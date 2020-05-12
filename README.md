@@ -71,6 +71,15 @@ $ docker run --rm -v "$PWD/tests":/compiler/tests coolc mytest semant mytest.cl
 
 Will compare my implementation of the semantic analyzer and the reference implementation of the semantic analyzer, when both are fed the AST generated after running my implementation of the lexer and parser on the input file.
 
+### Quick Start
+
+I provided a bash environment file to make the above commands easier. Load it into your bash shell with the command `source .bash_profile` (from the repo root). Then you can use the command aliases:
+
+- `coolc-build` to build the image (instead of `docker build...`).
+- `coolc-run` to run the image (instead of `docker run ...`), you still need to pass arguments like defined above. NOTE: this will attach stdin, stdout and stderr for you.
+- `coolc-test` to test the files (instead of `docker run coolc test`), you still need to pass arguments like defined above, but you can omit the `test`.
+- `coolc-mytest` to test the files (instead of `docker run coolc mytest`), you still need to pass arguments like defined above, but you can omit the `mytest`.
+
 ### Troubleshooting
 
 > I keep getting `I/O error` when running the compiled Cool program.
