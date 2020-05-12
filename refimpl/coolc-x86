@@ -1,0 +1,130 @@
+#!/bin/bash
+set -o errexit -o pipefail
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+LEXER="${DIR}/lexer"
+PARSER="${DIR}/parser"
+SEMANT="${DIR}/semant"
+CGEN="${DIR}/cgen-x86"
+COOLSTDLIB="${DIR}/coolx86.asm"
+
+phase() {
+    set +o errexit
+    $*
+    RESULT="$?"
+    set -o errexit
+    if [ "$RESULT" -ne 0 ] ; then
+        echo "Aborted with exit code $RESULT from $1" >&2
+        exit "${RESULT}"
+    fi
+}
+
+check() {
+    F="$1"
+    while [ ! -z "$F" ]; do
+        if [ ! -x "$F" ]; then
+            echo "Can't find compiler phase $F"
+            echo "Make sure it's been compiled, placed in the current directory, and marked executable."
+            exit 2
+        fi
+        shift
+        F="$1"
+    done 
+}
+
+FILES=""
+FIRSTFILENAME=""
+RUN=false
+ASSEMBLE=false
+while [ ! -z "$1" ]; do
+    case "$1" in
+        -h|--help)
+            echo "Syntax: $0 [-a] [-r] filename.cl"
+            echo "   -a   assemble as well as generate"
+            echo "   -r   assemble and run"
+            exit 1
+            ;;
+        -a)
+            ASSEMBLE=true
+            shift
+            ;;
+        -r)
+            ASSEMBLE=true
+            RUN=true
+            shift
+            ;;
+        *)
+            if [ ! -f "$1" ]; then
+                echo "Can't find file ${1}"
+                exit 2 
+            fi
+            if [[ "$1" != *.cl ]]; then
+                echo "Specified file ${1} doesn't have .cl suffix"
+                exit 2
+            fi
+            if [ -z "${FIRSTFILENAME}" ]; then
+                FIRSTFILENAME="${1}"
+            fi
+            FILES="${FILES} ${1}"
+            shift
+            ;;
+    esac
+done
+
+if [ -z "${FILES}" ]; then
+    echo "No files specified; try --help"
+    exit 2
+fi
+
+check "${LEXER}" "${PARSER}" "${SEMANT}" "${CGEN}"
+OUTFILE="$(basename ${FIRSTFILENAME} .cl).asm"
+BINOBJFILE="$(basename ${FIRSTFILENAME} .cl).o"
+BINEXEFILE=$(realpath "$(basename ${FIRSTFILENAME} .cl)")
+
+OUTDATA="$(phase "${LEXER}" <(cat ${FILES}) | phase "${PARSER}" | phase "${SEMANT}" | phase "${CGEN}" )"
+
+
+if ${ASSEMBLE}; then
+    if [ ! -f "${COOLSTDLIB}" ]; then
+        echo >&2 "Could not find ${COOLSTDLIB}"
+        exit 1
+    fi
+    if ! which nasm >& /dev/null; then
+        echo >&2 "Could not find nasm executable, please install it:"
+        echo >&2 "   sudo apt-get install nasm"
+        exit 1
+    fi
+    if ! which ld >& /dev/null; then
+        echo >&2 "Could not find ld executable, please install it:"
+        echo >&2 "   sudo apt-get install binutils"
+        exit 1
+    fi
+    if [ ! -f /usr/lib32/crt1.o ]; then
+        echo >&2 "Could not find crt1.o library, please install it:"
+        echo >&2 "   sudo apt-get install libc6-dev-i386"
+        exit 1
+    fi
+    if [ ! -f /lib32/ld-linux.so.2 ]; then
+        echo >&2 "Could not find libc6-i386 library, please install it:"
+        echo >&2 "   sudo apt-get install libc6-i386"
+        exit 1
+    fi
+    COOLSTDLIBBINOBJ="${COOLSTDLIB%.asm}.o"
+    echo "${OUTDATA}" > "$OUTFILE"    
+    nasm -f elf -gstabs -o "${BINOBJFILE}" "${OUTFILE}"
+    nasm -f elf -gstabs -o "${COOLSTDLIBBINOBJ}" "${COOLSTDLIB}"
+    ld -o "${BINEXEFILE}" -m elf_i386 /lib/ld-linux.so.2 /usr/lib32/crt1.o /usr/lib32/crti.o -lc "${BINOBJFILE}" "${COOLSTDLIBBINOBJ}" /usr/lib32/crtn.o -I/lib32/ld-linux.so.2     
+    echo >&2 "Wrote executable file to ${BINEXEFILE}"
+else
+    echo "${OUTDATA}" > "$OUTFILE"    
+    echo >&2 "Wrote asm code to $OUTFILE"
+fi
+
+if ${RUN}; then
+    if [ ! -f "${BINEXEFILE}" ]; then
+        echo >&2 "Couldn't find executable ${BINEXEFILE}"
+        exit 1
+    fi
+    exec "${BINEXEFILE}"
+fi

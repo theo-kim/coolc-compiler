@@ -1,0 +1,106 @@
+README file for Programming Assignment 3 (C++ edition)
+Write-up for PA3
+----------------
+
+1. Explain design decisions, explain why your code is correct, and why
+    your test cases are adequate.
+
+NOTE: it seems that my parser does not assign no_expr() nodes the value of #0 as the
+refrence implementation does. I could not figure out how to make it do this...
+
+--SECTION 1: Rules--
+The grammar rules are taken directly from the Cool Manual with three exceptions:
+
+1. let statements are translated from lists into recurssive expressions so that
+   `let x : Int, y : Int, z : Int in x + y + z` is translated into the recurssive:
+   `let x : Int in let y : Int in let z : Int in x + y + z`. This recurssive non-
+   terminal is referred to as let_list.
+2. expression lists appear in two different forms in the grammar: in execution blocks
+   (i.e. `{exp1; ... ; expN}` blocks) and as method dispatch parameters (i.e.
+   `A.method(exp1, ... , expN)`). The formers is referred to as block_expression_list
+   in the grammar and the latter as expression_list. They are differentiated to account
+   for the difference in punctuation separating the expressions.
+3. case blocks are separated into two non-terminals: case, and cases. This is to allow
+   multiple case branches to be listed under the case conditional.
+
+Given that the rest of the rules are taken ver-batum from the Cool Manual, it can be
+assumed correct.
+
+--SECTION 2: Precendence--
+My parser handles precedence correctly as it orders operator precendence according to the
+Cool Manual. Additionally, all integer binary operators received a left associativity (as
+standard in mathematics, operations are performed from left to right, i.e. 1 + 2 + 3 = (1 + 2) + 3)
+
+The dispatch operators ('@' and '.') are also left associative as dispatch chaining (A.B().C()) is
+performed from left to right.
+
+Boolean operators are nonassociative as boolean operators '<' and '<=' compare integers but return
+booleans and therefore cannot be chained (i.e. 1 < 2 < 3 is not legal). While there is an edge case
+for the equality operator where three boolean values are compared (true = false = true) this is not
+allowed by the language without parenthesis.
+
+Unary operators are right associative as they must resolve the lower portions of the logic chain before
+resolving itself (i.e. NOT NOT NOT NOT false == NOT (NOT (NOT (NOT false) ) )).
+
+The special operator 'isvoid' is nonassociative as they cnanot be chain because 'isvoid' returns a bool
+which cannot be evaluated for being void.
+
+Assignment was made right associative as the value being assigned to the variable must be resolved before
+being assigned.
+
+There is one special case for precedence for the let statement which is documented as extending right as
+far as possible. Furthermore, without precendence specification, there is a reduce/shift conflict where
+expressions following the IN keyword can be reduced into the let statement or shifted into its own expression.
+Therefore let was given a low precendence (equivalent to ASSIGN) so that all other operators resolve before
+the let statement, allowing it to extend as right as possible.
+
+--SECTION 3: Error Recovery--
+I identified six potential situations where the parser should recover from error and
+continue parsing at the end of the current non-terminal. Furthermore, I identified
+potential error cases for each situation that would need to be included in the grammar.
+Each potential error is labeled and referenced in bad.cl for my test cases.
+
+1. Incorrect class declaration:
+  A. The class TYPEID has a lexer error
+  B. The feature list has an error
+  C. Both the TYPEID and feature list have errors
+  
+  In all three situations, parsing should resume after the closing '}' and ';'
+  I designed the parser such that all three incorrect class definitions are
+  recognized as a correct grammar for the class nonterminal.
+
+2. Incorrect feature declaration:
+   A. The feature's label is incorrect (attribute or method)
+   B. The method body has an error
+   C. The formal list is has an error in a method declaration
+   D. The attribute declaration is incorrect
+
+   In all four situations, the parser should resume checking at the next valid
+   class definition.
+
+3. Incorrect operator usage:
+   A. Non-associativity of boolean operators
+   B. Non-associativity of isvoid operator
+   C. Incorrect dispatch **self dispatch is checked in good.cl**
+
+   As per the rationale mentioned above, both boolean operators and
+   isvoid operators cannot be placed associatively.
+
+4. Incorrect precedence:
+   **This is not actually tested in bad.cl but rather in good.cl to ensure that the
+   created parser output conforms to the refrence implementation.**
+
+5. Incorrect expression lists:
+   Expression lists (both in blocks and method argument lists) should continue parsing	
+   if one expression is flawed.
+
+6. Incorrect let bindings:
+   A. Missing punctuation in the let binding list
+   B. Incorrect expression following IN keyword
+   C. Incorrect expression following ASSIGN operator
+
+   The let statement is extremely complex in this grammar given its nesting behavior.
+   Therefore it is important to ensure that all expressions are correct. An error in one
+   subexpression (either in the assignment in the binding list) or in the IN expression
+   should not halt parsing for the entire block assuming that the punctuation (',' separating
+   binding list entries) is valid.

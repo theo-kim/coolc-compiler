@@ -1,0 +1,117 @@
+README file for Programming Assignment 2 (C++ edition)
+Instructions
+------------
+
+	To compile your lextest program type:
+
+	% make
+
+	Run your lexer by putting your test input in a file 'foo.cl' and
+	run the lextest program:
+
+	% ./lexer foo.cl
+
+	To run your lexer on the file test.cl type:
+
+	% make dotest
+
+	If you think your lexical analyzer is correct and behaves like
+	the one we wrote, you can try it out by replacing the lexer
+	in the reference compiler with your own lexer. Just copy
+	your compiled lexer binary from this assignment into the
+	directory where the reference compiler is.	
+	If your lexical analyzer behaves in an
+	unexpected manner, you may get errors anywhere, i.e. during
+	parsing, during semantic analysis, during code generation or
+	only when you run the produced code. So beware.
+
+	To submit your solution, run:
+
+	% make zip
+
+	Check the resulting zip file to make sure it contains everything
+	it should. Then submit it on Gradescope.
+
+	GOOD LUCK!
+
+---8<------8<------8<------8<---cut here---8<------8<------8<------8<---
+
+Write-up for PA2
+----------------
+
+1. Explain design decisions, explain why your code is correct, and
+   why your test cases are adequate.
+
+I split the code into the four main lexical structures defined by the Cool 
+manual (as well as comments and whitespace and errors):
+
+- identifiers
+There are two types of identifiers: Object Identifiers and Type Identifiers. 
+Both contain letters, numbers, and _, however type identifiers need to start
+with an uppercase letter and object identifiers start with a lowercase letter.
+Therefore I made their regex expressions:
+
+TYPEID: [A-Z][a-zA-Z0-9_]*       # this ensures that it is string with at least
+																	 a single uppercase letter
+OBJECTID: [a-z][a-zA-Z0-9_]*		 # ditto ^ except a lowercase letter to start
+
+I test this at various points in test.cl by putting several 1 character identifiers
+to ensure that it is still recognizes as the correct identifier.
+
+- literals
+There are three types of literals / constants:
+	- integers:
+		these are easy, they are a single expression checking for one or more digit:
+		
+		[0-9]+
+	
+	- booleans:
+		these require that the first letter is a lowercase and further letters are 
+		case insensitive. Therefore the following equation requires that the first
+		letter be lowercase and further letters not be for both true and false
+
+		([t](?i:rue))|([f](?i:alse))    # notice the use of ?i: to force
+																			case insensitivity
+																		
+	- strings:
+		strings are difficult as they require several error checks and dynamic buffer
+		concatenation. I maintain a global buffer of MAX STRING LENGTH 1024 + 1 for the
+		trailing \0.
+		I start the special STRING state when a " is encountered in the initial state
+		and return to the initial state and return the constant value with another "
+		is encountered.
+		When a \ is encountered, I enter another state for escaped sequences:
+			\0 = error
+			\n = safely escaped newline
+			btnf for recoignized special ASCII characters
+			all other characters are passed into the buffer
+
+- keywords:
+Keywords are a simple string check with the ?i: operator to force case insensitivity
+
+- special symbols:
+Similar to keywords this is only a single character
+
+- comments 
+Comment are nested in cool, so I basically count how many open comment symbols
+are found. If a closing symbol is found and there are zero unresolved open comments
+then one can throw an error. I test this with a stray close comment symbol as well 
+as an EOF in a comment
+
+- whitespace
+Whitespace is collected at the end of the lexical analysis and is done in single
+character intervals:
+
+[[:blank:]\n\f\r\t\v]     # this checks all legal whitespace as defined by the 
+													  cool manual
+
+- errors
+I maintain a separate start state for errors that require the lexer to check until 
+a specific condition (i.e. end of the string). The function throw_error() sets the 
+state to ERROR_STATE, which will need a new expression to catch and begin the initial
+state to continue lexing. I can test this by seeing if a NULL character error stops
+lexical analysis (which it doesn't)
+Additionally, a single, catch all expression is at the end of the lexer to catch
+unidentified symbols:
+
+<*>. { return throw_invalid_char(yytext); }

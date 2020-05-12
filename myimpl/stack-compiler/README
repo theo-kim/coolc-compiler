@@ -1,0 +1,22 @@
+Questions on PA1
+----------------
+
+1. Describe your implementation of the stack machine in a single short
+   paragraph.
+
+I created a singly linked list with inherited class instances. Pushing to the stack was peformed
+by linking the old top to a new node and pointing to the new node for the top of the resulting
+stack. Popping was the opposite: I would assign the top pointer to the next node pointed to by the
+old top allowing the dereferenced old top to be removed from memory by the garbage collector.
+
+2. List 3 things that you like about the Cool programming language.
+
+It is really fun to program in because it is purely object oriented
+I enjoy the simplicity of the language (very few built in functions) and it was easy to learn because of it
+I like the ability to do runtime type checking (which is not built into C++)
+
+3. List 3 things you DON'T like about Cool.
+
+The if statements are clunky (the need for som many nested ifs and fis)
+The need for additional braces for code blocks to execute sequential code
+I couldn't figure out the constructor usage pattern (if there were any)
