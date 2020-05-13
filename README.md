@@ -15,6 +15,7 @@ This repository is composed for the following components:
   - *Parser* (`parser`): takes the tokenized input and a previously defined grammar and produces an abstract syntax tree.
   - *Semantic Analyzer* (`semant`): Takes the AST from the previous step and performs static type analysis to ensure runtime safety and produces an AST annotated with type information.
   - *Code Generator* (`cgen`): Takes the annotated AST and produces executable machine code in x86.
+  - **NOTE**: I did not make the Makefiles, they were provided in the course documentation
 - **./tests**: test files to run using each layer.
 - **README.md**: this file.
 - **docker.sh**: a driver file for running the Docker image.
@@ -79,6 +80,8 @@ I provided a bash environment file to make the above commands easier. Load it in
 - `coolc-run` to run the image (instead of `docker run ...`), you still need to pass arguments like defined above. NOTE: this will attach stdin, stdout and stderr for you.
 - `coolc-test` to test the files (instead of `docker run coolc test`), you still need to pass arguments like defined above, but you can omit the `test`.
 - `coolc-mytest` to test the files (instead of `docker run coolc mytest`), you still need to pass arguments like defined above, but you can omit the `mytest`.
+- `coolc` to run the reference compiler and execute the resulting code on an input file
+- `mycoolc` to run my compiler and execute the resulting code on an input file
 
 ### Troubleshooting
 

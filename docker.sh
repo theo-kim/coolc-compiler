@@ -120,7 +120,13 @@ else if [[ $1 =~ $exec_pattern ]]; then
         cd /compiler/refimpl 
         ./coolc-x86 -r $input_file
     else 
-        echo "my"
+        mkdir /compiler/testimpl
+        cp /compiler/refimpl/* /compiler/testimpl
+        cp /compiler/myimpl/cgen/cgen /compiler/testimpl
+        cd /compiler/testimpl
+        ./coolc-x86 -r $input_file
+        cd /compiler
+        rm -rf /compiler/testimpl
     fi
 else
     echoerr "[ERROR] Unknown argument format"

@@ -38,6 +38,7 @@
 
 
 #define EMPTYSLOT            0
+#define INCOMPLETE           ""
 #define LABEL                ":\n"
 
 #define STRINGNAME (char *) "String"
@@ -58,14 +59,18 @@
 #define BOOL_SLOTS        1
 
 #define GLOBAL        "\tglobal\t"
+#define GLOBAL_NOTAB  "global "
 #define ALIGN         "\talign\t4\n"
 #define WORD          "\tdd\t"
+#define BYTE          "\tdb\t"
+#define EXTERN        "extern "
 
 //
 // comment symbol in 
 // 
-#define COMMENT "; "
+#define COMMENT "\t; "
 #define NL      "\n"
+#define ARG     ", "
 
 // START OF REGISTERS
 // => General registers
@@ -124,6 +129,7 @@
 #define JE      "\tje\t"
 #define JLE     "\tjle\t"
 #define JL      "\tjl\t"
+#define JZ      "\tjz\t"
 //      => Jumps
 #define JMP     "\tjmp\t"
 // => Memory operations
