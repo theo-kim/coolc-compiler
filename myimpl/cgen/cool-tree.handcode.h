@@ -83,7 +83,7 @@ Symbol get_name() { return name; }
 #define method_EXTRAS 							\
 Symbol get_method() { return name; }  			\
 Symbol get_attribute() { return nullptr; }		\
-int code(ostream& s) { s << "\t; coding method\n"; return 1; }
+int code(ostream& s);
 
 #define attr_EXTRAS								\
 Symbol get_method() { return nullptr; }			\

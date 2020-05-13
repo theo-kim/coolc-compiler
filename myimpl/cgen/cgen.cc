@@ -1039,12 +1039,14 @@ void CgenNode::code_initializer(ostream &str) {
 
 void CgenNode::code_methods(ostream& str) {
   List<CgenNode> *childCursor = children;
-  for (int i = features->first(); features->more(i); i = features->next(i)) {
-    Feature feature = features->nth(i);
-    if (feature->get_method() == nullptr) continue;
-    // First emit the label
-    str << name << CLASSINIT_SUFFIX << feature->get_name() << LABEL;
-    feature->code(str); // emit the method's code
+  if (basic_status == Basicness::NotBasic) {
+    for (int i = features->first(); features->more(i); i = features->next(i)) {
+      Feature feature = features->nth(i);
+      if (feature->get_method() == nullptr) continue;
+      // First emit the label
+      str << name << METHOD_SEP << feature->get_name() << LABEL;
+      feature->code(str); // emit the method's code
+    }
   }
   // Now generate for the children
   if (childCursor == NULL) return; // Leaf node
@@ -1053,6 +1055,7 @@ void CgenNode::code_methods(ostream& str) {
     childCursor->hd()->code_methods(str);
   } while ((childCursor = childCursor->tl()) != NULL);
 }
+  
 
 //   Fill in the following methods to produce code for the
 //   appropriate expression.  You may add or remove parameters
@@ -1244,4 +1247,13 @@ int object_class::code(ostream &s) {
   return 0;
 }
 
-
+int method_class::code(ostream &s) {
+  emit_stackframe(s, accumulator_level);
+  // Set up the self argument (eax)
+  emit_self_arg(s);
+  // TODO: finish
+  emit_pop(ECX, s);
+  // Close the stackframe and return from the function
+  emit_stackframe_close(s);
+  return 1;
+}

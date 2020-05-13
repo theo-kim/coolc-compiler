@@ -122,7 +122,7 @@ else if [[ $1 =~ $exec_pattern ]]; then
     else 
         mkdir /compiler/testimpl
         cp /compiler/refimpl/* /compiler/testimpl
-        cp /compiler/myimpl/cgen/cgen /compiler/testimpl
+        cp /compiler/myimpl/cgen/cgen /compiler/testimpl/cgen-x86
         cd /compiler/testimpl
         ./coolc-x86 -r $input_file
         cd /compiler

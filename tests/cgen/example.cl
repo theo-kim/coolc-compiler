@@ -25,7 +25,9 @@ class B inherits A {
   test(): Int { b.get() };
 };
 
-class Main {
-  main():Int { 0 };
+class Main inherits IO {
+  main(): Object {
+    out_string("Hello World\n")
+  };
 };
 
