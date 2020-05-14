@@ -11,6 +11,11 @@
 #define yylineno curr_lineno
 extern int yylineno;
 
+class CgenClassTable;
+typedef CgenClassTable *CgenClassTableP;
+class CgenNode;
+typedef CgenNode *CgenNodeP;
+
 inline Boolean copy_Boolean(Boolean b) {return b; }
 inline void assert_Boolean(Boolean) {}
 inline void dump_Boolean(ostream& stream, int padding, Boolean b)
@@ -72,7 +77,7 @@ void dump_with_types(ostream&,int);
 virtual void dump_with_types(ostream&,int) = 0; \
 virtual Symbol get_method() = 0; 				\
 virtual Symbol get_attribute() = 0;				\
-virtual int code(ostream& s) = 0;				\
+virtual int code(ostream& s, CgenNodeP) = 0;		\
 virtual Symbol get_name() = 0;		
 
 
@@ -83,40 +88,42 @@ Symbol get_name() { return name; }
 #define method_EXTRAS 							\
 Symbol get_method() { return name; }  			\
 Symbol get_attribute() { return nullptr; }		\
-int code(ostream& s);
+int code(ostream& s, CgenNodeP);
 
 #define attr_EXTRAS								\
 Symbol get_method() { return nullptr; }			\
 Symbol get_attribute() { return type_decl;  }	\
-int code(ostream& s) { return init->code(s); }
+int code(ostream& s, CgenNodeP p) { return init->code(s, p); }
 
 #define Formal_EXTRAS                           \
-virtual void dump_with_types(ostream&,int) = 0;
-
+virtual void dump_with_types(ostream&,int) = 0; \
+virtual void code(ostream&, CgenNodeP, int) = 0;
 
 #define formal_EXTRAS                           \
-void dump_with_types(ostream&,int);
+void dump_with_types(ostream&,int);				\
+void code(ostream&, CgenNodeP, int);
 
 
 #define Case_EXTRAS                             \
-virtual void dump_with_types(ostream& ,int) = 0;
+virtual void dump_with_types(ostream& ,int) = 0;\
+virtual void code(ostream&, CgenNodeP) = 0;
 
 
 #define branch_EXTRAS                           \
-void dump_with_types(ostream& ,int);
-
+void dump_with_types(ostream& ,int);			\
+void code(ostream&, CgenNodeP);
 
 #define Expression_EXTRAS                    	\
 Symbol type;                                 	\
 Symbol get_type() { return type; }           	\
 Expression set_type(Symbol s) { type = s; return this; } \
-virtual int code(ostream&) = 0; 				\
+virtual int code(ostream&, CgenNodeP) = 0;		\
 virtual void dump_with_types(ostream&,int) = 0; \
 void dump_type(ostream&, int);               	\
 Expression_class() { type = (Symbol) NULL; }
 
 #define Expression_SHARED_EXTRAS           		\
-int code(ostream&); 			   				\
+int code(ostream&, CgenNodeP);					\
 void dump_with_types(ostream&,int); 
 
 

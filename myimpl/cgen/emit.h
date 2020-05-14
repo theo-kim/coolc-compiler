@@ -40,6 +40,7 @@
 #define EMPTYSLOT            0
 #define INCOMPLETE           ""
 #define LABEL                ":\n"
+#define VOID_VAL             0
 
 #define STRINGNAME (char *) "String"
 #define INTNAME    (char *) "Int"
@@ -54,9 +55,12 @@
 #define SIZE_OFFSET         1
 #define DISPTABLE_OFFSET    2
 
-#define STRING_SLOTS      1
-#define INT_SLOTS         1
-#define BOOL_SLOTS        1
+#define STRING_SLOTS        1
+#define INT_SLOTS           1
+#define BOOL_SLOTS          1
+
+#define INT_VALUE_OFFSET    3
+#define BOOL_VALUE_OFFSET   3
 
 #define GLOBAL        "\tglobal\t"
 #define GLOBAL_NOTAB  "global "
@@ -114,6 +118,9 @@
 #define SUB     "\tsub\t"
 #define DEC     "\tdec\t"
 #define NEG     "\tneg\t"
+#define MUL     "\tmul\t"
+#define DIV     "\tidiv\t"
+#define CDQ     "\tcdq\t" // sign extension
 //      => Logic operations
 #define AND     "\tand\t"
 #define OR      "\tor\t"

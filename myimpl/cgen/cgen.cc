@@ -25,7 +25,10 @@
 #include "cgen.h"
 #include "cgen_gc.h"
 #include <map>
+#include <vector>
 #include <sstream>
+#include <algorithm>
+#include <limits>
 
 extern void emit_string_constant(ostream& str, char *s);
 extern int cgen_debug;
@@ -171,23 +174,20 @@ static void emit_init_call(Symbol classname, ostream& s) {
   s << CALL << classname << CLASSINIT_SUFFIX << NL;
 }
 
-// static void emit_neg(char *dest, char *src1, ostream& s)
-// { s << NEG << dest << " " << src1 << endl; }
+static void emit_neg(char *dest, ostream& s)
+{ s << NEG << dest << endl; }
 
 static void emit_add(char *dest, char *src, ostream& s)
 { s << ADD << dest << ARG << src << NL; }
 
-// static void emit_addu(char *dest, char *src1, char *src2, ostream& s)
-// { s << ADDU << dest << " " << src1 << " " << src2 << endl; }
-
 static void emit_addi(char *dest, int imm, ostream& s)
 { s << ADD << dest << ARG << imm << endl; }
 
-// static void emit_div(char *dest, char *src1, char *src2, ostream& s)
-// { s << DIV << dest << " " << src1 << " " << src2 << endl; }
+static void emit_div(char *div, ostream& s)
+{ s << DIV << div << endl; }
 
-// static void emit_mul(char *dest, char *src1, char *src2, ostream& s)
-// { s << MUL << dest << " " << src1 << " " << src2 << endl; }
+static void emit_mul(char *mul, ostream& s)
+{ s << MUL << mul << endl; }
 
 static void emit_sub(char *dest, char *src, ostream& s)
 { s << SUB << dest << ARG << src << endl; }
@@ -205,6 +205,12 @@ static void emit_jump(char *jump_type, int label, ostream& s) {
   emit_label_ref(label, s);
   s << NL;
 }
+
+static void emit_xor(char *dst, char* src, ostream& s) 
+{ s << XOR << dst << ARG << src << endl; }
+
+static void emit_cdq(ostream& s)
+{ s << CDQ << endl; }
 
 // static void emit_sll(char *dest, char *src1, int num, ostream& s)
 // { s << SLL << dest << " " << src1 << " " << num << endl; }
@@ -230,11 +236,10 @@ static void emit_method_call(Symbol classname, Symbol methodname, ostream& s) {
   s << NL;
 }
 
-// static void emit_label_def(int l, ostream &s) {
-//   // TODO
-//   emit_label_ref(l,s);
-//   s << ":" << endl;
-// }
+static void emit_label_def(int l, ostream &s) {
+  emit_label_ref(l,s);
+  s << ":" << endl;
+}
 
 // static void emit_beqz(char *source, int label, ostream &s)
 // {
@@ -294,11 +299,13 @@ static void emit_method_call(Symbol classname, Symbol methodname, ostream& s) {
 
 // Push a register on the stack. The stack grows towards smaller addresses.
 static void emit_push(char *reg, ostream& str) {
+  stack_offset++;
   str << PUSH << reg << NL;
 }
 
 // Pop the top of the stack onto a register
 static void emit_pop(char *reg, ostream& str) {
+  stack_offset--;
   str << POP << reg << NL;
 }
 
@@ -306,12 +313,16 @@ static void emit_stackframe(ostream& s, int vars) {
   emit_push(EBP, s); // push base pointer
   emit_move(EBP, ESP, s); // Move the stack pointer to the base pointer
   emit_addi(ESP, -(vars * 4), s); // Allocate space for local variables
+  stack_history.push_back(stack_offset);
+  stack_offset = vars;
 }
 
-static void emit_stackframe_close(ostream& s) {
+static void emit_stackframe_close(ostream& s, int args) {
   emit_move(ESP, EBP, s); // Move the stack pointer to the base of the frame
   emit_pop(EBP, s); // restore the base pointer
-  s << RET << EMPTYSLOT << NL;
+  s << RET << args * WORD_SIZE << NL;
+  stack_offset = stack_history[stack_history.size() - 1];
+  stack_history.pop_back();
 }
 
 static void emit_self_arg(ostream& s) {
@@ -864,7 +875,8 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
    class__class((const class__class &) *nd),
    parentnd(NULL),
    children(NULL),
-   basic_status(bstatus)
+   basic_status(bstatus),
+   table(ct)
 { 
    stringtable.add_string(name->get_string());          // Add class name to string table
 }
@@ -898,39 +910,55 @@ void CgenNode::code_name_tab_entry(ostream& str) {
   } while ((childCursor = childCursor->tl()) != NULL);
 }
 
+int CgenNode::resolve_dispatches(CgenNodeP node) {
+  if (node == NULL) return 0; // reached the root
+  int offset = resolve_dispatches(node->get_parentnd()); // get highest offset from the parent
+  Symbol nodeName = node->name; // name of the node
+  for (int i = node->features->first(); node->features->more(i); i = node->features->next(i)) {
+    Feature feature = node->features->nth(i);
+    Symbol methodName = feature->get_method();
+    if (methodName == nullptr) continue; // it's an attribute, so ignore
+    int methodOffset = 0;
+    if (nodeName != name) 
+      methodOffset = std::get<2>(table->lookup(nodeName)->dispatch_table[methodName]);
+    else if (node->parentnd != NULL && // If it has a parent
+      table->lookup(node->parentnd->name) != NULL && // If the parent is in the symbol table
+      table->lookup(node->parentnd->name)->dispatch_table.find(methodName) != table->lookup(node->parentnd->name)->dispatch_table.end()) // If the parent has a function by the same name
+    { methodOffset = std::get<2>(table->lookup(node->parentnd->name)->dispatch_table[methodName]); }
+    else methodOffset = offset++;
+    dispatch_table[methodName] = DispatchTableEntry(methodName, nodeName, methodOffset);
+    offset = std::max(offset, methodOffset + 1);
+  }
+  return offset;
+}
+
 // Make a dispatch table for each node
 void CgenNode::code_dispatch_table(ostream& str) {
+  int offset = 0;
   CgenNodeP p = parentnd;
   List<CgenNode> *childCursor = children;
   
   // Insert this function's method to the dispatch table
-  for (int i = features->first(); features->more(i); i = features->next(i)) {
-     Feature feature = features->nth(i);
-     Symbol methodName = feature->get_method();
-     if (methodName == nullptr) continue;
-     dispatch_table.insert(DispatchTableEntry(methodName, name));
-  }
-  
-  // For inheritted methods
-  while (p != NULL) {
-    // Add its methods to the dispatch table, existing function names are not inserted
-    for (int i = p->features->first(); p->features->more(i); i = p->features->next(i)) {
-      Feature feature = p->features->nth(i);
-      Symbol methodName = feature->get_method();
-      if (methodName == nullptr) continue;
-      // Only new method names will add a new entry to the dispatch table
-      dispatch_table.insert(DispatchTableEntry(methodName, p->name));
+  resolve_dispatches(this);
+  std::vector<DispatchTableEntry *> entries;
+  while (entries.size() != dispatch_table.size()) {
+    DispatchTableEntry *minimum = nullptr;
+    for (DispatchTable::iterator it = dispatch_table.begin(); it != dispatch_table.end(); it++ ) {
+      // If the last element in the list is greater than the current its already in the list
+      if (entries.size() > 0 && std::get<2>(*entries[entries.size() - 1]) >= std::get<2>(it->second)) continue;
+      if (minimum == nullptr || std::get<2>(*minimum) > std::get<2>(it->second)) {
+        minimum = &dispatch_table[it->first];
+      }
     }
-    p = p->parentnd;
+    entries.push_back(minimum);
   }
-  
   // Actually emit the dispatch table
   // Dispatch table header
   str << GLOBAL_NOTAB << name << DISPTAB_SUFFIX << NL;
   str << name << DISPTAB_SUFFIX << LABEL;
   // Write a method for each
-  for (DispatchTable::iterator it = dispatch_table.begin(); it != dispatch_table.end(); it++ ) {
-    str << WORD << it->second << METHOD_SEP << it->first << NL;
+  for (size_t i = 0; i < entries.size(); ++i) {
+    str << WORD << std::get<1>(*entries[i]) << METHOD_SEP << std::get<0>(*entries[i]) << NL;
   }
   
   // Now generate for the children
@@ -968,11 +996,12 @@ void CgenNode::resolve_attributes(CgenNodeP node, std::stringstream& str, int *l
 }
 
 // Code the prototype of the object (i.e. pointer to dispatch table and attributes)
-int CgenNode::code_prototype(ostream& str, int tag) {
+int CgenNode::code_prototype(ostream& str, int _tag) {
   std::stringstream attributes;
   List<CgenNode> *childCursor = children;
   CgenNodeP p = parentnd;
   int prototypeSize = 3;
+  tag = _tag;
   // First find all the inheritted attributes top down
   resolve_attributes(this, attributes, &prototypeSize); 
 
@@ -1002,11 +1031,13 @@ int CgenNode::code_prototype(ostream& str, int tag) {
 // Code the initializer function for the object
 void CgenNode::code_initializer(ostream &str) {
   List<CgenNode> *childCursor = children;
+  int attributeOffset = 0;
+  // Initialize scope
+  table->scope.enterscope();
   // First emit the label
   str << name << CLASSINIT_SUFFIX << LABEL;
   // Set up the stackframe
-  // TODO: determine max accumulator level (sum of the required arguments for the height of the tree)
-  emit_stackframe(str, accumulator_level);
+  emit_stackframe(str, 0);
   // Set up the self argument (eax)
   emit_self_arg(str);
   // Call the initializer for the object's parent
@@ -1016,24 +1047,29 @@ void CgenNode::code_initializer(ostream &str) {
     Feature feature = features->nth(i);
     if (feature->get_attribute() == nullptr) continue;
     accumulator_level = 2;
-    if (feature->code(str) >= 0) { // Code the feature
-      // Move the result (stored in eax) into the destination register
+    table->self_reference = name;
+    if (feature->code(str, this) >= 0) { // Code the attribute
+      // Move the result (stored in eax) into the destination register (if no no_exp)
       emit_store(ECX, attributes.find(feature->get_name())->second, EAX, str);
     }
+    table->scope.addid(feature->get_name(), new IdentifierOffset(ECX, attributes.find(feature->get_name())->second));
   }
   // Set up the return value (eax)
   emit_move(EAX, ECX, str);
   emit_pop(ECX, str);
   // Close the stackframe and return from the function
-  emit_stackframe_close(str);
+  emit_stackframe_close(str, 0);
 
   // Now generate for the children
-  if (childCursor == NULL) return; // Leaf node
-  // Iterate through the children depth first
-  do {
-    childCursor->hd()->code_initializer(str);
-  } while ((childCursor = childCursor->tl()) != NULL);
-
+  if (childCursor != NULL)  {
+    // Iterate through the children depth first
+    do {
+      childCursor->hd()->code_initializer(str);
+    } while ((childCursor = childCursor->tl()) != NULL);
+  } // Leaf node
+  // Exit the scope
+  current_scope = table->scope; // save the scope
+  table->scope.exitscope();
   return;
 }
 
@@ -1045,7 +1081,8 @@ void CgenNode::code_methods(ostream& str) {
       if (feature->get_method() == nullptr) continue;
       // First emit the label
       str << name << METHOD_SEP << feature->get_name() << LABEL;
-      feature->code(str); // emit the method's code
+      table->self_reference = name;
+      feature->code(str, this); // emit the method's code
     }
   }
   // Now generate for the children
@@ -1055,81 +1092,175 @@ void CgenNode::code_methods(ostream& str) {
     childCursor->hd()->code_methods(str);
   } while ((childCursor = childCursor->tl()) != NULL);
 }
-  
 
 //   Fill in the following methods to produce code for the
 //   appropriate expression.  You may add or remove parameters
 //   as you wish, but if you do, remember to change the parameters
 //   of the declarations in `cool-tree.h'  Sample code for
 //   constant integers, strings, and booleans are provided.
-int assign_class::code(ostream &s) {
-  // TODO: code an assignment statement (i.e. add a value to an object ID)
-  s << COMMENT << "implement assignment" << NL;
-  return 0;
+int assign_class::code(ostream &s, CgenNodeP ct) {
+  int offset;
+  char *reg;
+  IdentifierOffset *id = ct->current_scope.lookup(name); // lookup the location of the variable being assigned to
+  if (id == nullptr) { return 1; } // shouldn't happen...
+  offset = id->second;
+  reg = id->first;
+  this->expr->code(s, ct); // resolve the expression
+  // move the value from the expression to the variable at given offset
+  if (strncmp(reg, EBP, 3) == 0) {
+    emit_store(reg, offset + 1, EAX, s);
+  }
+  else {
+    emit_store(reg, offset, EAX, s);
+  }
+  return 1;
 }
 
-int static_dispatch_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement static dispatch" << NL;
-  return 0;
-}
-
-int dispatch_class::code(ostream &s) {
+int static_dispatch_class::code(ostream &s, CgenNodeP ct) {
   // load arguments into the stack
   for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
     Expression e = actual->nth(i);
-    e->code(s);
+    e->code(s, ct);
     emit_push(EAX, s);
   }
   // resolve the calling expression
-  expr->code(s);
+  expr->code(s, ct);
   // check for void
   emit_cmpi(EAX, 0, s);
   emit_jump(JNE, label_counter, s);
   // if void, throw runtime error
   emit_move(EAX, "str_const0", s);
-  emit_partial_load_address(EAX, s);
-  s << curr_lineno << NL;
+  emit_partial_load_address(ESI, s);
+  s << line_number << NL;
   emit_call("_dispatch_abort", s);
   // if not void, get the dispatch table for the object
-  emit_label_ref(label_counter++, s);
-  s << LABEL;
-  emit_load(ESI, EAX, DISPTABLE_OFFSET, s);
-  // TODO: find the desired function in the dispatch table
-  s << COMMENT << "find dispatched function" << NL;
-  // call the dispatched function
-  emit_call(ESI, s);
+  emit_label_def(label_counter++, s);
+  // find the desired function in the dispatch table
+  Symbol type = type_name;
+  if (type == SELF_TYPE) type = ct->table->self_reference;
+  CgenNode *node = ct->table->lookup(type);
+  DispatchTableEntry *entry = node->get_dispatch_offset(name);
+  if (entry == nullptr) cout << "Something went wrong" << NL;
+  int offset = std::get<2>(*entry);
+  emit_partial_load_address(ESI, s);
+  s << type << DISPTAB_SUFFIX << NL;
+  emit_load(ESI, ESI, offset, s);
+  emit_call(ESI, s); // call the dispatched function
   // DONE
+  return 1;
+}
+
+int dispatch_class::code(ostream &s, CgenNodeP ct) {
+  // load arguments into the stack
+  for (int i = actual->first(); actual->more(i); i = actual->next(i)) {
+    Expression e = actual->nth(i);
+    e->code(s, ct);
+    emit_push(EAX, s);
+  }
+  // resolve the calling expression
+  expr->code(s, ct);
+  // check for void
+  emit_cmpi(EAX, 0, s);
+  emit_jump(JNE, label_counter, s);
+  // if void, throw runtime error
+  emit_move(EAX, "str_const0", s);
+  emit_partial_load_address(ESI, s);
+  s << line_number << NL;
+  emit_call("_dispatch_abort", s);
+  // if not void, get the dispatch table for the object
+  emit_label_def(label_counter++, s);
+  emit_load(ESI, EAX, DISPTABLE_OFFSET, s);
+  // find the desired function in the dispatch table
+  Symbol type = expr->get_type();
+  if (type == SELF_TYPE) type = ct->table->self_reference;
+  CgenNode *node = ct->table->lookup(type);
+  DispatchTableEntry *entry = node->get_dispatch_offset(name);
+  if (entry == nullptr) cout << "Something went wrong" << NL;
+  int offset = std::get<2>(*entry);
+  emit_load(ESI, ESI, offset, s);
+  emit_call(ESI, s); // call the dispatched function
+  // DONE
+  return 1;
+}
+
+int cond_class::code(ostream &s, CgenNodeP ct) {
+  int false_label = label_counter++;
+  int end_label = label_counter++;
+  pred->code(s, ct); // Code the predicate
+  emit_load(ESI, EAX, BOOL_VALUE_OFFSET, s); // Move predicate value into ESI
+  emit_cmpi(ESI, 0, s); // Check if the predicate is false
+  emit_jump(JZ, false_label, s); // If false jump to the false label
+  then_exp->code(s, ct); // Execute the true body
+  emit_jump(JMP, end_label, s); // Unconditionally jump to the end of the conditional
+  emit_label_def(false_label, s); // Emit the false label
+  else_exp->code(s, ct); // Execute the false body
+  emit_label_def(end_label, s); // Emit the end label
+  return 1;
+}
+
+int loop_class::code(ostream &s, CgenNodeP ct) {
+  // Loop
+  int loop_begin = label_counter++;
+  int loop_end = label_counter++;
+  emit_label_def(loop_begin, s); // Emit the loop start label
+  pred->code(s, ct); // Code the predicate
+  emit_load(ESI, EAX, BOOL_VALUE_OFFSET, s); // Fetch the value of the predicate boolean
+  emit_cmpi(ESI, 0, s); // Check if the predicate is false
+  emit_jump(JE, loop_end, s); // If so, jump to end of the loop
+  body->code(s, ct); // Else execute the loop
+  emit_jump(JMP, loop_begin, s); // Unconditionally jump back to the beginning of the loop
+  emit_label_def(loop_end, s); // Emit end of the loop label
+  emit_move(EAX, "0", s); // return void by moving zero into EAX
   return 0;
 }
 
-int cond_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement conditional" << NL;
+int typcase_class::code(ostream &s, CgenNodeP ct) {
+  int case_label = label_counter++;
+  int case_default_error = label_counter++;
+  int end_of_case = label_counter++;
+  expr->code(s, ct); // Evaluate the expression
+  emit_cmpi(EAX, VOID_VAL, s); // check if the value of the expression is void, if so runtime error
+  emit_jump(JNE, case_label, s); // jump past runtime error if expr is not void
+  emit_move(EAX, "str_const0", s); // move filename into argument
+  emit_partial_load_address(ESI, s); // move current filename into the other argument
+  s << line_number << NL;
+  emit_call("_case_abort2", s); // call the runtime error
+  emit_label_def(case_label, s); // emit label for rest of case
+  emit_load(EDI, EAX, TAG_OFFSET, s); // Load the object type tag
+  for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
+    Case branch = cases->nth(i);
+    branch->code(s, ct); // Code each branch
+  }
+  // If none is found, emit _case_abort runtime error
+  emit_label_def(case_default_error, s); // Emit case runtime error label
+  emit_call("_case_abort", s); // call the runtime error
+  emit_label_def(end_of_case, s); // emit end of the case label
+
   return 0;
 }
 
-int loop_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement loop" << NL;
-  return 0;
+void branch_class::code(ostream& s, CgenNodeP ct) {
+  // TODO: finish coding this
+  int class_tag = ct->table->lookup(type_decl)->get_tag();
 }
 
-int typcase_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement case" << NL;
-  return 0;
+int block_class::code(ostream &s, CgenNodeP ct) {
+  // iterate through each expression and emit code
+  for (int i = body->first(); body->more(i); i = body->next(i)) {
+    Expression e = body->nth(i);
+    e->code(s, ct);
+  }
+  return 1;
 }
 
-int block_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement block" << NL;
-  return 0;
-}
-
-int let_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement let" << NL;
+int let_class::code(ostream &s, CgenNodeP ct) {
+  ct->current_scope.enterscope(); // enter a new scope for the local variables
+  init->code(s, ct); // emit the code for the local variable
+  emit_push(EAX, s); // push local variable onto the stack
+  ct->current_scope.addid(identifier, new IdentifierOffset(EBP, -stack_offset)); // add to scope
+  body->code(s, ct);
+  emit_addi(ESP, 4, s); // clean up local variables from the stack
+  ct->current_scope.exitscope(); // leave scope
   return 0;
 }
 
@@ -1138,122 +1269,220 @@ int let_class::code(ostream &s) {
 //   - then initialize new int object
 //   - perform operation
 //   - store value into new int object
-void binary_operation(char *op, Expression e1, Expression e2, ostream &s) {
-  e1->code(s); // emit subexpression 1
-  emit_store(EBP, -accumulator_level, EAX, s); // put result onto the stack
-  --accumulator_level; // decrement accumulator for lower actions
-  e2->code(s); // emit subexpression 2
+void binary_operation(char *op, Expression e1, Expression e2, ostream &s, CgenNodeP ct) {
+  e1->code(s, ct); // emit subexpression 1
+  emit_push(EAX, s); // put result onto the stack
+  e2->code(s, ct); // emit subexpression 2
   emit_method_call(Object, copy_sym, s); // Copy that object
-  // Perform addition
-  ++accumulator_level; // increment accumulator
-  emit_load(ESI, EBP, -accumulator_level, s);
-  emit_load(EDI, EAX, 3, s);
-  emit_load(ESI, ESI, 3, s);
-  s << op << ESI << ARG << EDI << NL;
-  emit_store(EAX, 3, ESI, s); 
+  emit_pop(ESI, s); // get the other operand from the stack
+  emit_load(EDI, EAX, INT_VALUE_OFFSET, s); // get the value from e2
+  emit_load(ESI, ESI, INT_VALUE_OFFSET, s); // get the value from e1
+  s << op << ESI << ARG << EDI << NL; // perform operation
+  emit_store(EAX, INT_VALUE_OFFSET, ESI, s); // store result back into the int object
 }
 
-int plus_class::code(ostream &s) {
-  binary_operation(ADD, e1, e2, s);
+int plus_class::code(ostream &s, CgenNodeP ct) {
+  binary_operation(ADD, e1, e2, s, ct);
   return 1;
 }
 
-int sub_class::code(ostream &s) {
-  binary_operation(SUB, e1, e2, s);
+int sub_class::code(ostream &s, CgenNodeP ct) {
+  binary_operation(SUB, e1, e2, s, ct);
   return 1;
 }
 
-int mul_class::code(ostream &s) {
-  // TODO: figure out how multiplication works in x86
-  s << COMMENT << "implement mul" << NL;
+int mul_class::code(ostream &s, CgenNodeP ct) {
+  e1->code(s, ct); // emit e1
+  emit_push(EAX, s); // push e1 onto the stack
+  e2->code(s, ct); // emit e2
+  emit_method_call(Object, copy_sym, s); // Copy the object for the result
+  emit_pop(ESI, s); // pop the second argument back into ESI
+  emit_load(EDI, EAX, INT_VALUE_OFFSET, s); // load the e2 integer value into EDI
+  emit_load(ESI, ESI, INT_VALUE_OFFSET, s); // load the e1 integer value into ESI
+  emit_push(EAX, s); // save the value of EAX
+  emit_push(EDX, s); // save the value of EDX
+  emit_move(EAX, ESI, s); // move the multiplicand into EAX for MUL instruction
+  emit_mul(EDI, s); // do the multiplication
+  emit_move(ESI, EAX, s); // move lower 32-bits into the ESI
+  emit_pop(EDX, s); // restore EDX
+  emit_pop(EAX, s); // restore EAX
+  emit_store(EAX, INT_VALUE_OFFSET, ESI, s); // store the value into the integer object
   return 0;
 }
 
-int divide_class::code(ostream &s) {
-  // TODO: figure out how integer division works in x86
-  s << COMMENT << "implement division" << NL;
+int divide_class::code(ostream &s, CgenNodeP ct) {
+  // NOTE: Potential runtime error (division by 0)
+  // Cool only has integer division
+  e1->code(s, ct); // emit e1
+  emit_push(EAX, s); // push e1 onto the stack
+  e2->code(s, ct); // emit e2
+  emit_method_call(Object, copy_sym, s); // Copy the object for the result
+  emit_pop(ESI, s); // pop e1 into ESI
+  emit_load(EDI, EAX, INT_VALUE_OFFSET, s); // load the e2 integer value into EDI
+  emit_load(ESI, ESI, INT_VALUE_OFFSET, s); // load the e1 integer value into ESI
+  emit_push(EAX, s); // save the value of EAX
+  emit_push(EDX, s); // save the value of EDX
+  emit_xor(EDX, EDX, s); // clear the value of EDX register
+  emit_move(EAX, ESI, s); // move the dividend value into EAX
+  emit_cdq(s); // extend the sign of EAX into EDX
+  emit_div(EDI, s); // do the division (the runtime will catch a division by zero)
+  emit_move(ESI, EAX, s); // move the quotient (ignoring the remainder) into ESI
+  emit_pop(EDX, s); // restore the value of EDX
+  emit_pop(EAX, s); // restore the value of EAX
+  emit_store(EAX, INT_VALUE_OFFSET, ESI, s); // move the quotient into the integer object
   return 0;
 }
 
-int neg_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement negation" << NL;
+int neg_class::code(ostream &s, CgenNodeP ct) {
+  e1->code(s, ct); // Code the expression
+  emit_method_call(Object, copy_sym, s); // Copy integer from e1
+  emit_load(ESI, EAX, INT_VALUE_OFFSET, s); // Load the value from e1
+  emit_neg(ESI, s); // Negate the value
+  emit_store(EAX, INT_VALUE_OFFSET, ESI, s); // Put the value back into the integer
   return 0;
 }
 
-int lt_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement lt" << NL;
+int lt_class::code(ostream &s, CgenNodeP ct) {
+  // Produces a boolean object
+  e1->code(s, ct); // emit code for e1
+  emit_push(EAX, s); // push e1 onto the stack
+  e2->code(s, ct); // emit code for e2
+  emit_pop(ESI, s); // pop e1 into ESI
+  emit_load(ESI, ESI, INT_VALUE_OFFSET, s); // load esi with value of esi
+  emit_load(EDI, EAX, INT_VALUE_OFFSET, s); // load e2 value into EDI
+  emit_load_bool(EAX, truebool, s); // load true by default into EAX
+  emit_cmp(ESI, EDI, s); // e1 < e2
+  emit_jump(JL, label_counter, s); // jump if less than
+  emit_load_bool(EAX, falsebool, s); // if not less than it is false
+  emit_label_def(label_counter++, s); // emit jump label
   return 0;
 }
 
-int eq_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement eq" << NL;
+int eq_class::code(ostream &s, CgenNodeP ct) {
+  // Equality produces a boolean object
+  //    - Already type safe
+  //    - Compare value of integers or booleans
+  //    - Compare pointers
+  //    - uses runtime equality_test
+  e1->code(s, ct); // emit code for e1
+  emit_push(EAX, s); // push e1 onto the stack
+  e2->code(s, ct); // emit code for e2
+  emit_pop(ESI, s); // pop e1 into ESI
+  emit_move(EDI, EAX, s); // move e2 into EDI
+  emit_load_bool(EAX, truebool, s); // load true by default into EAX
+  emit_cmp(ESI, EDI, s); // e1 = e2 (for pointer equality)
+  emit_jump(JE, label_counter, s); // jump if equal
+  emit_load_bool(EBX, falsebool, s); // load false for call to equality_test
+  emit_call("equality_test", s); // Check the equality with the runtime function (puts true or false into eax)
+  emit_label_def(label_counter++, s); // emit jump label
+  // No need to check value equality
   return 0;
 }
 
-int leq_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement leq" << NL;
+int leq_class::code(ostream &s, CgenNodeP ct) {
+  // Produces a boolean object
+  e1->code(s, ct); // emit code for e1
+  emit_push(EAX, s); // push e1 onto the stack
+  e2->code(s, ct); // emit code for e2
+  emit_pop(ESI, s); // pop e1 into ESI
+  emit_load(ESI, ESI, INT_VALUE_OFFSET, s); // load esi with value of esi
+  emit_load(EDI, EAX, INT_VALUE_OFFSET, s); // load e2 value into EDI
+  emit_load_bool(EAX, truebool, s); // load true by default into EAX
+  emit_cmp(ESI, EDI, s); // e1 < e2
+  emit_jump(JLE, label_counter, s); // jump if less than
+  emit_load_bool(EAX, falsebool, s); // if not less than it is false
+  emit_label_def(label_counter++, s); // emit jump label
   return 0;
 }
 
-int comp_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement comp" << NL;
+int comp_class::code(ostream &s, CgenNodeP ct) {
+  // produces a boolean object (not)
+  e1->code(s, ct); // emit code for the expression
+  emit_load(ESI, EAX, BOOL_VALUE_OFFSET, s); // move boolean object value into ESI
+  emit_load_bool(EAX, truebool, s); // move true into EAX
+  emit_cmpi(ESI, 0, s); // check if e1 is false
+  emit_jump(JZ, label_counter, s); // if comparison is 0 (i.e. e1 == false) jump
+  emit_load_bool(EAX, falsebool, s); // if comparison is 1 (i.e. e1 == true) then assign result to false
+  emit_label_def(label_counter++, s); // emit label
   return 0;
 }
 
-int int_const_class::code(ostream& s) {
+int int_const_class::code(ostream& s, CgenNodeP ct) {
   emit_load_int(EAX,inttable.lookup_string(token->get_string()), s);
   return 1;
 }
 
-int string_const_class::code(ostream& s) {
+int string_const_class::code(ostream& s, CgenNodeP ct) {
   emit_load_string(EAX,stringtable.lookup_string(token->get_string()),s);
   return 1;
 }
 
-int bool_const_class::code(ostream& s) {
+int bool_const_class::code(ostream& s, CgenNodeP ct) {
   emit_load_bool(EAX, BoolConst(val), s);
   return 1;
 }
 
-int new__class::code(ostream &s) {
+int new__class::code(ostream &s, CgenNodeP ct) {
   emit_initialize_class(type_name, s);
   return 1;
 }
 
-int isvoid_class::code(ostream &s) {
-  e1->code(s); // code the subexpression
+int isvoid_class::code(ostream &s, CgenNodeP ct) {
+  e1->code(s, ct); // code the subexpression
   emit_move(ESI, EAX, s); // move result of said subexpression to ESI
   emit_load_bool(EAX, truebool, s); // move true to return
   emit_cmpi(ESI, 0, s);
   emit_jump(JZ, label_counter, s);
   emit_load_bool(EAX, falsebool, s); // move false to return
-  emit_label_ref(label_counter++, s);
-  s << LABEL;
+  emit_label_def(label_counter++, s);
   return 0;
 }
 
-int no_expr_class::code(ostream &s) {
+int no_expr_class::code(ostream &s, CgenNodeP ct) {
   return -1;
 }
 
-int object_class::code(ostream &s) {
-  // TODO
-  s << COMMENT << "implement object" << NL;
-  return 0;
+int object_class::code(ostream &s, CgenNodeP ct) {
+  // cout << name << endl;
+  if (name == self) emit_move(EAX, ECX, s); // if the current object is self, then return self ref
+  else {
+    IdentifierOffset *id = ct->current_scope.lookup(name);
+    if (id == nullptr) { return 1; }
+    int offset = id->second;
+    char *reg = id->first;
+    if (strncmp(reg, EBP, 3) == 0) {
+      emit_load(EAX, reg, offset + 1, s);
+    }
+    else {
+      emit_load(EAX, reg, offset, s);
+    }
+  }
+  return 1;
 }
 
-int method_class::code(ostream &s) {
-  emit_stackframe(s, accumulator_level);
+int method_class::code(ostream &s, CgenNodeP ct) {
+  // intialize new scope
+  ct->current_scope.enterscope();
+  // set up the stack frame
+  emit_stackframe(s, 0);
   // Set up the self argument (eax)
   emit_self_arg(s);
-  // TODO: finish
-  emit_pop(ECX, s);
+  // set up local variables (inject formals)
+  for (int i = formals->first(); formals->more(i); i = formals->next(i)) {
+    Formal formal = formals->nth(i);
+    formal->code(s, ct, formals->len() - i - 1);
+  }
+  expr->code(s, ct); // Code the expression
+  // return value should already by in EAX
+  emit_pop(ECX, s); // restore ecx
   // Close the stackframe and return from the function
-  emit_stackframe_close(s);
+  emit_stackframe_close(s, formals->len());
+  // exit the scope
+  ct->current_scope.exitscope();
   return 1;
+}
+
+void formal_class::code(ostream &s, CgenNodeP ct, int offset) {
+  // add the formal to the scope
+  ct->current_scope.addid(name, new IdentifierOffset(EBP, offset + 1));
 }

@@ -6,28 +6,32 @@
 class Type {
   a : Int <- 10;
   get() : Int { a };
-  add(a: Int, b: Int, c: Int) : Int { a };
+  add(a: Int, b: Int, c: Int) : Object { let i : Int <- 1 + 2 in i };
 };
 
 class A {
-  a : Int <- 1 + 3;
+  a : Int <- 3;
   w : Int <- 1 + (2 + 2);
   f : String;
-  test(): Int { 0 };
+  test(): Object { 0 };
   copy() : SELF_TYPE { self };
 };
 
 class B inherits A {
   b : Type <- new Type;
   c : String <- "Hello World";
-  d : Bool <- isvoid(b);
-  g : Int <- b.add(1, 2, 3);
-  test(): Int { b.get() };
+  d : Bool <- not (1 = 1);
+  g : Int;
+  test(): Object { b.add(1, 2, 3) };
 };
 
 class Main inherits IO {
+  a : B <- new B;
   main(): Object {
-    out_string("Hello World\n")
+    {
+      a@A.test();
+      out_string("Hello World\n");
+    }
   };
 };
 

@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <map>
+#include <tuple>
+#include <vector>
 #include "emit.h"
 #include "cool-tree.h"
 #include "symtab.h"
@@ -41,7 +43,8 @@ Symbol
        type_name,
        val;
 
-int accumulator_level, label_counter = 0;
+int accumulator_level, label_counter = 0, stack_offset = 0;
+std::vector<int> stack_history;
 
 enum Basicness     {Basic, NotBasic};
 #define TRUE 1
@@ -53,10 +56,11 @@ typedef CgenClassTable *CgenClassTableP;
 class CgenNode;
 typedef CgenNode *CgenNodeP;
 
-typedef std::map<Symbol, Symbol> DispatchTable;
-typedef std::pair<Symbol, Symbol> DispatchTableEntry;
+typedef std::tuple<Symbol, Symbol, int> DispatchTableEntry;
+typedef std::map<Symbol, DispatchTableEntry > DispatchTable;
 typedef std::map<Symbol, int> AttributeOffsets;
 typedef std::pair<Symbol, int> AttributeOffsetEntry;
+typedef std::pair<char *, int> IdentifierOffset;
 
 class CgenClassTable : public SymbolTable<Symbol,CgenNode> {
 private:
@@ -98,6 +102,9 @@ public:
    CgenClassTable(Classes, ostream& str);
    void code();
    CgenNodeP root();
+
+   Symbol self_reference;
+   SymbolTable<Symbol, IdentifierOffset> scope;
 };
 
 
@@ -110,7 +117,8 @@ private:
                                               // `NotBasic' otherwise
    DispatchTable dispatch_table;
    AttributeOffsets attributes;
-
+   
+   int tag;
 public:
    CgenNode(Class_ c,
             Basicness bstatus,
@@ -123,6 +131,7 @@ public:
    int basic() { return (basic_status == Basic); }
    
    void resolve_attributes(CgenNodeP node, std::stringstream& str, int *len);
+   int resolve_dispatches(CgenNodeP node);
 
    void code_obj_tab_entry(ostream& str);
    void code_name_tab_entry(ostream& str);
@@ -130,6 +139,15 @@ public:
    int code_prototype(ostream &str, int tag);
    void code_initializer(ostream &str);
    void code_methods(ostream &str);
+
+   int get_tag() { return tag; }
+   DispatchTableEntry *get_dispatch_offset(Symbol methodName) { 
+      if (dispatch_table.find(methodName) == dispatch_table.end()) return nullptr;
+      return &dispatch_table[methodName];
+   }
+
+   CgenClassTableP table;
+   SymbolTable<Symbol, IdentifierOffset> current_scope;
 };
 
 class BoolConst {
