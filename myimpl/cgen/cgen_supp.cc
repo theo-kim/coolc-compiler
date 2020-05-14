@@ -8,14 +8,14 @@ static int ascii = 0;
 
 void ascii_mode(ostream& str) {
   if (!ascii) {
-    str << BYTE << "\"";
+    str << BYTE << "`";
     ascii = 1;
   } 
 }
 
 void byte_mode(ostream& str) {
   if (ascii) {
-    str << "\"\n";
+    str << "`\n";
     ascii = 0;
   }
 }

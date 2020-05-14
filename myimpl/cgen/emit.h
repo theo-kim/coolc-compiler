@@ -137,6 +137,7 @@
 #define JLE     "\tjle\t"
 #define JL      "\tjl\t"
 #define JZ      "\tjz\t"
+#define JG      "\tjg\t"
 //      => Jumps
 #define JMP     "\tjmp\t"
 // => Memory operations

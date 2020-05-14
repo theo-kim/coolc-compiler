@@ -132,12 +132,6 @@ static void emit_store(char *source_reg, int offset, char *dest_reg, ostream& s)
   s << MOV << "[" << source_reg << "+" << offset * WORD_SIZE << "]" << ARG << dest_reg << endl;
 }
 
-// static void emit_load_imm(char *dest_reg, int val, ostream& s)
-// { s << LI << dest_reg << " " << val << endl; }
-
-// static void emit_load_address(char *dest_reg, char *address, ostream& s)
-// { s << LA << dest_reg << " " << address << endl; }
-
 static void emit_partial_load_address(char *dest_reg, ostream& s)
 { s << MOV << dest_reg << ARG; }
 
@@ -212,24 +206,6 @@ static void emit_xor(char *dst, char* src, ostream& s)
 static void emit_cdq(ostream& s)
 { s << CDQ << endl; }
 
-// static void emit_sll(char *dest, char *src1, int num, ostream& s)
-// { s << SLL << dest << " " << src1 << " " << num << endl; }
-
-// static void emit_jalr(char *dest, ostream& s)
-// { s << JALR << "\t" << dest << endl; }
-
-// static void emit_jal(char *address,ostream &s)
-// { s << JAL << address << endl; }
-
-// static void emit_return(ostream& s)
-// { s << RET << endl; }
-
-// static void emit_gc_assign(ostream& s)
-// { s << JAL << "_GenGC_Assign" << endl; }
-
-// static void emit_disptable_ref(Symbol sym, ostream& s)
-// {  s << sym << DISPTAB_SUFFIX; }
-
 static void emit_method_call(Symbol classname, Symbol methodname, ostream& s) {
   s << CALL;
   emit_method_ref(classname, methodname, s);
@@ -240,62 +216,6 @@ static void emit_label_def(int l, ostream &s) {
   emit_label_ref(l,s);
   s << ":" << endl;
 }
-
-// static void emit_beqz(char *source, int label, ostream &s)
-// {
-//   s << BEQZ << source << " ";
-//   emit_label_ref(label,s);
-//   s << endl;
-// }
-
-// static void emit_beq(char *src1, char *src2, int label, ostream &s)
-// {
-//   s << BEQ << src1 << " " << src2 << " ";
-//   emit_label_ref(label,s);
-//   s << endl;
-// }
-
-// static void emit_bne(char *src1, char *src2, int label, ostream &s)
-// {
-//   s << BNE << src1 << " " << src2 << " ";
-//   emit_label_ref(label,s);
-//   s << endl;
-// }
-
-// static void emit_bleq(char *src1, char *src2, int label, ostream &s)
-// {
-//   s << BLEQ << src1 << " " << src2 << " ";
-//   emit_label_ref(label,s);
-//   s << endl;
-// }
-
-// static void emit_blt(char *src1, char *src2, int label, ostream &s)
-// {
-//   s << BLT << src1 << " " << src2 << " ";
-//   emit_label_ref(label,s);
-//   s << endl;
-// }
-
-// static void emit_blti(char *src1, int imm, int label, ostream &s)
-// {
-//   s << BLT << src1 << " " << imm << " ";
-//   emit_label_ref(label,s);
-//   s << endl;
-// }
-
-// static void emit_bgti(char *src1, int imm, int label, ostream &s)
-// {
-//   s << BGT << src1 << " " << imm << " ";
-//   emit_label_ref(label,s);
-//   s << endl;
-// }
-
-// static void emit_branch(int l, ostream& s)
-// {
-//   s << BRANCH;
-//   emit_label_ref(l,s);
-//   s << endl;
-// }
 
 // Push a register on the stack. The stack grows towards smaller addresses.
 static void emit_push(char *reg, ostream& str) {
@@ -323,6 +243,7 @@ static void emit_stackframe_close(ostream& s, int args) {
   s << RET << args * WORD_SIZE << NL;
   stack_offset = stack_history[stack_history.size() - 1];
   stack_history.pop_back();
+  stack_offset -= args;
 }
 
 static void emit_self_arg(ostream& s) {
@@ -347,22 +268,6 @@ static void emit_initialize_class(Symbol classname, ostream& s) {
   // Call initialization function
   emit_init_call(classname, s);
 }
-
-// //
-// // Fetch the integer value in an Int object.
-// // Emits code to fetch the integer value of the Integer object pointed
-// // to by register source into the register dest
-// //
-// static void emit_fetch_int(char *dest, char *source, ostream& s)
-// { emit_load(dest, DEFAULT_OBJFIELDS, source, s); }
-
-// //
-// // Emits code to store the integer value contained in register source
-// // into the Integer object pointed to by dest.
-// //
-// static void emit_store_int(char *source, char *dest, ostream& s)
-// { emit_store(source, DEFAULT_OBJFIELDS, dest, s); }
-
 
 // static void emit_test_collector(ostream &s)
 // {
@@ -641,9 +546,9 @@ CgenClassTable::CgenClassTable(Classes _classes, ostream& s) :
   nds(NULL),
   str(s)
 {
-  stringclasstag = 4;
-  intclasstag =    2;
-  boolclasstag =   3;
+  stringclasstag = 3;
+  intclasstag =    1;
+  boolclasstag =   2;
 
   enterscope();
   if (cgen_debug) cout << "Building CgenClassTable" << endl;
@@ -697,27 +602,6 @@ void CgenClassTable::install_basic_classes() {
 	   filename),
     Basic,this));
 
-  // The IO class inherits from Object. Its methods are
-  //        out_string(Str) : SELF_TYPE          writes a string to the output
-  //        out_int(Int) : SELF_TYPE               "    an int    "  "     "
-  //        in_string() : Str                    reads a string from the input
-  //        in_int() : Int                         "   an int     "  "     "
-  install_class(
-    new CgenNode(
-      class_(IO, 
-            Object,
-            append_Features(
-            append_Features(
-            append_Features(
-            single_Features(method(out_string, single_Formals(formal(arg, Str)),
-                        SELF_TYPE, no_expr())),
-            single_Features(method(out_int, single_Formals(formal(arg, Int)),
-                        SELF_TYPE, no_expr()))),
-            single_Features(method(in_string, nil_Formals(), Str, no_expr()))),
-            single_Features(method(in_int, nil_Formals(), Int, no_expr()))),
-      filename),	    
-    Basic,this));
-
   // The Int class has no methods and only a single attribute, the
   // "val" for the integer. 
   install_class(
@@ -762,6 +646,27 @@ void CgenClassTable::install_basic_classes() {
 				   no_expr()))),
 	     filename),
         Basic,this));
+  
+  // The IO class inherits from Object. Its methods are
+  //        out_string(Str) : SELF_TYPE          writes a string to the output
+  //        out_int(Int) : SELF_TYPE               "    an int    "  "     "
+  //        in_string() : Str                    reads a string from the input
+  //        in_int() : Int                         "   an int     "  "     "
+  install_class(
+    new CgenNode(
+      class_(IO, 
+            Object,
+            append_Features(
+            append_Features(
+            append_Features(
+            single_Features(method(out_string, single_Formals(formal(arg, Str)),
+                        SELF_TYPE, no_expr())),
+            single_Features(method(out_int, single_Formals(formal(arg, Int)),
+                        SELF_TYPE, no_expr()))),
+            single_Features(method(in_string, nil_Formals(), Str, no_expr()))),
+            single_Features(method(in_int, nil_Formals(), Int, no_expr()))),
+      filename),	    
+    Basic,this));
 }
 
 // CgenClassTable::install_class
@@ -1022,10 +927,10 @@ int CgenNode::code_prototype(ostream& str, int _tag) {
   if (childCursor == NULL) return tag; // Leaf node
   // Iterate through the children depth first
   do {
-    tag = childCursor->hd()->code_prototype(str, tag + 1);
+    _tag = childCursor->hd()->code_prototype(str, _tag + 1);
   } while ((childCursor = childCursor->tl()) != NULL);
 
-  return tag;
+  return _tag;
 }
 
 // Code the initializer function for the object
@@ -1215,8 +1120,8 @@ int loop_class::code(ostream &s, CgenNodeP ct) {
 }
 
 int typcase_class::code(ostream &s, CgenNodeP ct) {
+  std::vector<std::pair<CgenNodeP, Case> > branches;
   int case_label = label_counter++;
-  int case_default_error = label_counter++;
   int end_of_case = label_counter++;
   expr->code(s, ct); // Evaluate the expression
   emit_cmpi(EAX, VOID_VAL, s); // check if the value of the expression is void, if so runtime error
@@ -1227,21 +1132,57 @@ int typcase_class::code(ostream &s, CgenNodeP ct) {
   emit_call("_case_abort2", s); // call the runtime error
   emit_label_def(case_label, s); // emit label for rest of case
   emit_load(EDI, EAX, TAG_OFFSET, s); // Load the object type tag
-  for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
-    Case branch = cases->nth(i);
+  while (branches.size() != (size_t)cases->len()) { // order the branches by tag
+    std::pair<CgenNodeP, Case> maximum = std::pair<CgenNodeP, Case>(nullptr, nullptr);
+    for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
+      Case branch = cases->nth(i);
+      CgenNodeP curr = ct->table->lookup(branch->get_type());
+      if (branches.size() > 0 && branches[branches.size() - 1].first->get_tag() <= curr->get_tag()) continue;
+      if (maximum.first == nullptr || maximum.first->get_tag() < curr->get_tag()) {
+        maximum = std::pair<CgenNodeP, Case>(curr, branch);
+      }
+    }
+    branches.push_back(maximum);
+  }
+  for (size_t i = 0; i < branches.size(); ++i) {
+    Case branch = branches[i].second;
     branch->code(s, ct); // Code each branch
+    emit_jump(JMP, end_of_case, s); // emit unconditional jump to end
   }
   // If none is found, emit _case_abort runtime error
-  emit_label_def(case_default_error, s); // Emit case runtime error label
+  emit_label_def(label_counter++, s); // Emit case runtime error label
   emit_call("_case_abort", s); // call the runtime error
   emit_label_def(end_of_case, s); // emit end of the case label
 
   return 0;
 }
 
+int search_tag(CgenNodeP node) {
+  List<CgenNode> *childCursor = node->get_children();
+  if (childCursor == NULL) { // If no children, no need to check
+    return node->get_tag();
+  }
+  while (childCursor->tl() != NULL) { // look for the last child
+    childCursor = childCursor->tl();
+  }
+  return search_tag(childCursor->hd());
+}
+
 void branch_class::code(ostream& s, CgenNodeP ct) {
-  // TODO: finish coding this
-  int class_tag = ct->table->lookup(type_decl)->get_tag();
+  // get class tag number for the type of the branch
+  CgenNodeP branch_node = ct->table->lookup(type_decl);
+  int class_tag = branch_node->get_tag();
+  emit_label_def(label_counter++, s);// Emit label
+  emit_cmpi(EDI, class_tag, s); // Emit bottom check (this tag)
+  emit_jump(JL, label_counter, s); // Jump to next branch if false
+  emit_cmpi(EDI, search_tag(branch_node), s); // Emit top check (furthest child)
+  emit_jump(JG, label_counter, s); // Jump to next branch if false
+  ct->current_scope.enterscope(); // Enter scope branch variable
+  emit_push(EAX, s); // Allocate variable
+  expr->code(s, ct); // Execute code body
+  emit_addi(ESP, 4, s); // Clean up local variables
+  stack_offset--;
+  ct->current_scope.exitscope(); // Leave
 }
 
 int block_class::code(ostream &s, CgenNodeP ct) {
@@ -1260,6 +1201,7 @@ int let_class::code(ostream &s, CgenNodeP ct) {
   ct->current_scope.addid(identifier, new IdentifierOffset(EBP, -stack_offset)); // add to scope
   body->code(s, ct);
   emit_addi(ESP, 4, s); // clean up local variables from the stack
+  stack_offset--;
   ct->current_scope.exitscope(); // leave scope
   return 0;
 }

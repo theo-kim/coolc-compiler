@@ -25,11 +25,22 @@ class B inherits A {
   test(): Object { b.add(1, 2, 3) };
 };
 
+class C inherits A {};
+
+class D {};
+
 class Main inherits IO {
   a : B <- new B;
+  b : Int <- 3;
   main(): Object {
     {
       a@A.test();
+      while 0 < b loop
+        {
+          b <- b - 1;
+          out_string("Testing\n");
+        }
+      pool;
       out_string("Hello World\n");
     }
   };
