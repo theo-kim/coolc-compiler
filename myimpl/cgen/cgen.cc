@@ -243,7 +243,6 @@ static void emit_stackframe_close(ostream& s, int args) {
   s << RET << args * WORD_SIZE << NL;
   stack_offset = stack_history[stack_history.size() - 1];
   stack_history.pop_back();
-  stack_offset -= args;
 }
 
 static void emit_self_arg(ostream& s) {
@@ -1055,6 +1054,7 @@ int static_dispatch_class::code(ostream &s, CgenNodeP ct) {
   s << type << DISPTAB_SUFFIX << NL;
   emit_load(ESI, ESI, offset, s);
   emit_call(ESI, s); // call the dispatched function
+  stack_offset -= actual->len(); // remove arguments from the stack
   // DONE
   return 1;
 }
@@ -1088,6 +1088,7 @@ int dispatch_class::code(ostream &s, CgenNodeP ct) {
   int offset = std::get<2>(*entry);
   emit_load(ESI, ESI, offset, s);
   emit_call(ESI, s); // call the dispatched function
+  stack_offset -= actual->len(); // remove the arguments from the stack
   // DONE
   return 1;
 }
@@ -1124,6 +1125,8 @@ int loop_class::code(ostream &s, CgenNodeP ct) {
 }
 
 int typcase_class::code(ostream &s, CgenNodeP ct) {
+  // FIXME
+  emit_comment("Case Statement", s);
   std::vector<std::pair<CgenNodeP, Case> > branches;
   int case_label = label_counter++;
   int end_of_case = label_counter++;
@@ -1148,13 +1151,15 @@ int typcase_class::code(ostream &s, CgenNodeP ct) {
     }
     branches.push_back(maximum);
   }
+  int next_branch_label = label_counter++;
+  s << COMMENT << "original label: " << next_branch_label << NL;
   for (size_t i = 0; i < branches.size(); ++i) {
     Case branch = branches[i].second;
-    branch->code(s, ct); // Code each branch
+    next_branch_label = branch->code(s, ct, next_branch_label); // Code each branch
     emit_jump(JMP, end_of_case, s); // emit unconditional jump to end
   }
   // If none is found, emit _case_abort runtime error
-  emit_label_def(label_counter++, s); // Emit case runtime error label
+  emit_label_def(next_branch_label, s); // Emit case runtime error label
   emit_call("_case_abort", s); // call the runtime error
   emit_label_def(end_of_case, s); // emit end of the case label
 
@@ -1172,21 +1177,25 @@ int search_tag(CgenNodeP node) {
   return search_tag(childCursor->hd());
 }
 
-void branch_class::code(ostream& s, CgenNodeP ct) {
+int branch_class::code(ostream& s, CgenNodeP ct, int branch_label) {
+  int next_branch_label = label_counter++;
   // get class tag number for the type of the branch
   CgenNodeP branch_node = ct->table->lookup(type_decl);
   int class_tag = branch_node->get_tag();
-  emit_label_def(label_counter++, s);// Emit label
+  emit_label_def(branch_label, s);// Emit label
   emit_cmpi(EDI, class_tag, s); // Emit bottom check (this tag)
-  emit_jump(JL, label_counter, s); // Jump to next branch if false
+  emit_jump(JL, next_branch_label, s); // Jump to next branch if false
   emit_cmpi(EDI, search_tag(branch_node), s); // Emit top check (furthest child)
-  emit_jump(JG, label_counter, s); // Jump to next branch if false
+  emit_jump(JG, next_branch_label, s); // Jump to next branch if false
   ct->current_scope.enterscope(); // Enter scope branch variable
   emit_push(EAX, s); // Allocate variable
+  ct->current_scope.addid(name, new IdentifierOffset(EBP, -(stack_offset))); // add to scope
   expr->code(s, ct); // Execute code body
   emit_addi(ESP, 4, s); // Clean up local variables
   stack_offset--;
   ct->current_scope.exitscope(); // Leave
+
+  return next_branch_label;
 }
 
 int block_class::code(ostream &s, CgenNodeP ct) {
@@ -1202,8 +1211,7 @@ int let_class::code(ostream &s, CgenNodeP ct) {
   ct->current_scope.enterscope(); // enter a new scope for the local variables
   init->code(s, ct); // emit the code for the local variable
   emit_push(EAX, s); // push local variable onto the stack
-  s << COMMENT << "At offset " << -(stack_offset - 1) * 4 << NL;
-  ct->current_scope.addid(identifier, new IdentifierOffset(EBP, -stack_offset)); // add to scope
+  ct->current_scope.addid(identifier, new IdentifierOffset(EBP, -(stack_offset))); // add to scope
   body->code(s, ct);
   emit_addi(ESP, 4, s); // clean up local variables from the stack
   stack_offset--;
@@ -1398,10 +1406,13 @@ int object_class::code(ostream &s, CgenNodeP ct) {
     int offset = id->second;
     char *reg = id->first;
     if (strncmp(reg, EBP, 3) == 0) {
-      emit_load(EAX, reg, offset + 1, s);
+      if (offset >= 0) emit_load(EAX, reg, offset + 1, s);
+      else emit_load(EAX, reg, offset, s);
+      cout << COMMENT << name << " @ " << reg << " + " << (offset + 1) * WORD_SIZE << NL;
     }
     else {
       emit_load(EAX, reg, offset, s);
+      cout << COMMENT << name << " @ " << reg << " + " << (offset) * WORD_SIZE << NL;
     }
   }
   return 1;

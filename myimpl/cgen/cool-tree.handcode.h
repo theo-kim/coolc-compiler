@@ -106,13 +106,13 @@ void code(ostream&, CgenNodeP, int);
 
 #define Case_EXTRAS                             \
 virtual void dump_with_types(ostream& ,int) = 0;\
-virtual void code(ostream&, CgenNodeP) = 0;		\
+virtual int code(ostream&, CgenNodeP, int) = 0;		\
 virtual Symbol get_type() = 0;
 
 
 #define branch_EXTRAS                           \
 void dump_with_types(ostream& ,int);			\
-void code(ostream&, CgenNodeP);					\
+int code(ostream&, CgenNodeP, int);					\
 Symbol get_type() { return type_decl; }
 
 #define Expression_EXTRAS                    	\
