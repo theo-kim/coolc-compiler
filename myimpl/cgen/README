@@ -2,3 +2,355 @@ Write-up for PA5
 ----------------
 
 **NOTE: I chose to implement my code generator in x86 rather than MIPS
+
+In this explanation I will be be discussing the design of the four goals of my 
+code generator.
+
+	SECTION 1- Emitting code for global objects
+	SECTION 2- Emitting code for global tables
+	SECTION 3- Emitting code for object initializers
+	SECTION 4- Emitting code for object methods
+
++-------------------------------------------------------------------------------+
+| SECTION 1- EMITTING CODE FOR GLOBAL OBJECTS                                   |
++-------------------------------------------------------------------------------+
+
+=> 1.A. Global Constants:
+
+There are three types of constants that needed to be emitted: integers (Int),
+strings (String), and booleans (Bool). To generate these constants was a matter
+of replicating the prototypes for each object manually. This was done first.
+Each constant was added to a symbol table, then each entry individually emitted
+its own constant entry with a reference to its class's dispatch table and size.
+
+
+=> 1.B. Prototype Objects:
+
+Given that Cool is a heap based and object oriented language, prototypes serve as
+a template for new objects (these new objects are allocated using the built-in
+method Object.copy()). Prototype objects are composed of two components: an 
+object header (which includes a unique tag value (more on that in section 4.C.ii)
+the size of the prototype in words (4 bytes increments), and a pointer to that 
+object's method dispatch table) and its attributes. Given that this code generator
+was implemented as a one pass generator, the attributes are defined recursively
+and counted in order to calculate the size of the prototype. Since each object
+inherits, but cannot overwrite, the attributes of its parent class, defining 
+attributes means traversing up in the inheritance tree to find said attributes
+and their offsets as defined by the parent objects in their code generation. Each
+object maintained a map of their attributes and their offsets to be referenced
+by their children and later when resolving object names to their values.
+
+Finally, object attributes are initialized ot their default values in their
+prototype. For Integers, this default is 0 (a previously defined integer global
+constant), for Strings this default is "" (a previously defined String global
+constant), and for Booleans this default is false (a previously defined Boolean 
+global constant). For all other classes, default is void or 0.
+
+
++-------------------------------------------------------------------------------+
+| SECTION 2- EMITTING CODE FOR GLOBAL TABLES                                    |
++-------------------------------------------------------------------------------+
+
+=> 2.A. Object Table:
+
+The object table, as per the Cool language runtime guidelines, is a table which
+contains references to the initializer and prototype for each object in their tag
+order (i.e. such that references at lower addresses are to objects with a lower
+tag value). Given that the code generator build an inheritance tree and orders
+tags using pre-order traversal, the object table was generation by traversing
+over the inheritance tree using a pre-order traversal and generating the label
+specific to each class (i.e. classname + suffix).
+
+A standard suffix was used for both the prototype reference label and initializer
+reference label:
+
+    - prototype: _protObj
+    - initializer: _init
+
+
+=> 2.B. Name Table:
+
+The name table, as per the Cool language runtime guidelines, is the table which
+contains references to the string constants for each object's type name. For 
+example, the typename for the Object class is "Object", while the typename for
+the Integer class is "Integer". These string constants are emitted with the rest
+of the global constants. Generating the table simply involves doing a pre-order
+traversal of the inheritance tree, performing a lookup for each object's name
+and emitting the string constant reference for that string.
+
+
+=> 2.C. Dispatch Tables:
+
+Since Cool is an object oriented language with polymorphic method inheritance,
+it is important that methods be located at a centralized location and have 
+locations consistent across inheritance generations (i.e. if B inherits method
+f from A, the location of f in B and A's dispatch table is the same). This is
+so in an object is dispatched from, its type need not be inferred past the 
+static type inference made during semantic analysis. Similar to attribute 
+generation in the prototype object, method offsets are maintained in a map data
+structure in the inheritance tree such. Each object inherits said offset map 
+from its parent and may overwrite methods (i.e. if B implement inherited 
+method f, then the method pointer at the offset for f will point to B's 
+implementation of f rather than A's) or add new methods (which will be in turn
+passed on to its children).
+
+Dispatch table reference labels have the suffix "_dispTab".
+
+
++-------------------------------------------------------------------------------+
+| SECTION 3- EMITTING CODE FOR OBJECT INITIALIZERS                              |
++-------------------------------------------------------------------------------+
+
+=> 3.A. Inheritance:
+
+Each object has an initializer function which essentially run the initializer
+expression for each of its attributes and assigns the value of each expression
+to the attribute. However, before doing so, each initializer calls the initializer
+of its direct parent (which implements a recursive call all the way up the 
+inheritance tree). This is performed statically at compile time as the code 
+generator knows the name of the direct parent can can make a manual call to the
+function <parent_name>_Init.
+
+Initializers are passed a reference to the object being initialized in the EAX
+register in order to resolve attribute assignments. As attribute offsets within 
+the prototype are  maintained in the inheritance tree node, the offset from the 
+self reference can be calculated at runtime. As these attribute offsets are 
+consistent between parent and child, the parent initializer can accurately 
+assign the correct values to attributes of instances of descendent classes.
+
+The return value of an initializer is the reference to the object being 
+initialized, which is passed into the EAX register.
+
+
+=> 3.B. Attributes:
+
+To initialize an attribute, its initializer expression needs to be evaluated
+first. Hence, the first step of the initializer is to emit the code for the
+initializer expression. As explained later, all expressions deposit their
+result into the EAX register.
+
+As explained previously, each attribute's offset relative to the prototype
+start is known at compile time. Hence the assignment to the attribute occurs as:
+
+        mov [ecx + <offset>] eax
+
+The ECX register is allocated to hold the self reference passed into the 
+initializer by EAX. EAX contains the value from the initializer expression.
+Hence, at the conclusion of this operation, the attribute contains the value
+from the initializer expression.
+
+
++-------------------------------------------------------------------------------+
+| SECTION 4- EMITTING CODE FOR OBJECT METHODS                                   |
++-------------------------------------------------------------------------------+
+
+Potentially the most complex part of the code generator is producing the assembly
+code for each objects' methods. Each method is executed in three steps:
+
+    1. The caller pushes the method's arguments to the stack
+    2. The callee method sets up its stack frame
+    3. The callee evaluates the method's body expression
+    4. The callee places the final return value in EAX and returns, removing
+       the arguments pushed by the caller on return.
+
+=> 4.A. Stack Frames and Arguments: 
+
+Each method maintains a stack frame which looks like this:
+
+
+high memory address
++-------------------+
+|  LOCAL VARIABLE   | <- Stack pointer (ESP)
++-------------------+
+|  LOCAL VARIABLE   |
++-------------------+
+|     SAVED ECX     |
++-------------------+
+|  SAVED BASE PTR   | <- Base pointer (EBP)
++-------------------+
+|   RETURN ADDRESS  |
++-------------------+
+|  METHOD PARAMETER |
++-------------------+
+|  METHOD PARAMETER |
++-------------------+
+|  METHOD PARAMETER |
++-------------------+
+Low memory address
+
+When a function is dispatched, the method parameters are pushed onto the stack
+then the function is jumped to and the return address is also pushed onto the
+stack (done automatically by the call instruction). To set up its stack, every 
+method (including the initializer), pushes the previous stack frame's base 
+pointer (stored in EBP register) to the stack. Then it moves the EBP register to
+the ESP register (which is pointing to the base pointer location on the stack).
+Then the value on the ECX register is saved as the self reference is stored from
+EAX (where is was passed) onto ECX. 
+
+My code generator does not allocate local variables at compile time, but 
+at runtime using the push operation. These pushes are tracked at compile time so
+that the variables may be referenced by the compiler later.
+
+Cleaning up the stack at the end of the method is the reverse of the process. The
+locals are removed from the stack by decrementing the stack pointer, ECX is popped
+back onto ECX, and the method is returned. x86 includes the ret instruction 
+which can be passed the number of words to pop off the stack at return, so the
+parameters may be removed from the stack.
+
+
+=> 4.B. Scope Tracking: 
+
+To be able to resolve object identifiers (i.e. object attributes, method 
+parameters, and local variables introduced by let and case expressions), the 
+scope of the program needs to be tracked. The scope symbol table is a lookup
+table with the object identifier as the key and offset either in the stack 
+(for local variables) or within the object prototype (for attributes) as the 
+value. This is done using the provided symbol table class.
+
+The scope is constructed at compile time in three layers:
+
+    1. The first layer of the scope is generated during the prototype emission
+       where the attributes are added to the scope at the same time they are
+       added to the offset table. During recursion down the inheritance tree
+       each child object inherits the scope of its parent recursively to ensure
+       that the scope contains all inherited attributes. The offsets for these 
+       variables are in relation to the self reference (i.e. ECX + <offset>)
+    2. The second layer of the scope is generated when emitting the code for the
+       object methods. Since the object formals are known compile time, each 
+       can be added to the scope, overwriting previously added objects with the
+       same name (i.e. if a method has a formal parameter called 'a' but the 
+       object already has an attribute called 'a', the method parameter 'a' will
+       supersede the object attribute in the scope). The offset for these 
+       variables are in the stack, below the base pointer. Hence their offsets
+       are negative and calculated as EBP - 2 - <offset> (the additional 2 is to
+       account for the stored base pointer and return address which separates
+       the base pointer from the method parameters in the stack frame).
+    3. The final layer(s) of the scope is added when local variables are declared
+       either in a case statement (one local per branch) or in a let statement 
+       (one local in each nested let). These local variables are pushed onto the
+       stack and are referenced as EBP + 1 + <offset> (the additional 1 is for
+       the saved value of ECX in the stack frame).
+       NOTE: although not explicitly apart of the language, binary operations 
+       like addition, subtraction, less than, etc. require a single local
+       variable to store the intermediate result of the first subexpression.
+
+The value of the special object self is tracked separate from the scope. In this
+case, self is the value of the register ECX (passed into every method in EAX). 
+The type of self (i.e. SELF_TYPE) is assumed to be the type of the object declaring
+the method. Because the attribute and method offsets are consistent, inheritance 
+does not need to be tracked for self beyond the base class.
+
+
+=> 4.C. Emitting Expression Code:
+
+Emitting code for expressions is a diverse process. Most binary expressions 
+follow the following format:
+
+    1. Emit code for the first (left most) subexpression.
+    2. If the expression is binary (i.e. it has two subexpressions), push EAX
+       onto the stack and emit the code for the second subexpression.
+    3. Copy the object from the second (or first, depending on number of operands)
+       subexpression and keep it in EAX.
+    4. Move the actual value (i.e. the integer value for arithmetic operations
+       or the boolean truth value for comparisons) into ESI and EDI respectively
+    5. Perform an operation on said two argument registers.
+    6. Store the result of the operation in the object at EAX.
+
+Emitting code for expression involving jumps (i.e. loops and conditional)
+is accomplished using this basic pattern:
+
+    1. The predicate expression's code is emitted
+    2. ESI is given the truth value of the predicate bool object (i.e. EAX + 12).
+    3. ESI is compared to 0 (false)
+    4. If it is false, the program jumps to either the end of the loop or false 
+       conditional branch/
+    5. Otherwise execution proceeds with either the loop body or true branch.
+    6. If it is a loop, reaching the end of the body unconditionally jumps back
+       to the beginning of the loop.
+
+Emitting code for block expressions, is just a matter of emitting each expression
+subsequently. 
+
+Emitting code for assignment is a three step process:
+
+    1. The offset for the identified object is determined.
+    2. The expression is emitted
+    3. EAX (the value of the emitted expression) is moved into the offset 
+       calculated in the beginning.
+
+    => 4.C.i. Initializing New Objects
+
+    Initializing new objects is a special case. Since the object type is known
+    at compile time, its prototype reference can be moved into EAX. Then the built
+    in function Object.copy() is called to duplicate the prototype into a fresh
+    copy of the object. EAX now contains a pointer to the new object.
+
+    => 4.C.ii. Case Expressions
+
+    Case Expressions are the most complex expression to emit code for. However,
+    due to the way that tags are generated, they can be accomplished using 
+    nothing more than an integer comparison.
+
+    As Object tags are generated in a pre-order, traversal, the following rule
+    can be imposed on classes and their tags:
+
+        For every class C, and every child of C, D0...DN, the tag of Di 
+        where 0 < i < N, is equal to the tag of C plus i plus x where x
+        is the number of children of Di.
+
+    For example, if B and C inherit from A, and D and E inherit from B, if A's 
+    tag is 3, then B's tag is 4, D's tag is 5, E's tag is 6, and C's tag is 7.
+    Therefore, as a case statement looks for a branch with the type that is the
+    closest related type to the type of the expression, the referenced object's 
+    tag (which is at offset 0, hence EAX + 0), can be compared to the range 
+    [Ci, Nn], where Ci is the tag of the branch type C, and Nn is the tag of the
+    right most leaf of its inheritance subtree. Object is treated as a catch all
+    because all classes inherit from Object, hence, for Object, Ci = 0 and Nn =
+    the total number of classes defined in any Cool program. 
+
+    If an expression's class tag does not fulfill any branch check, then a runtime
+    error is thrown.
+
+    It is also worth mentioning that the code generator will actually alter the
+    order of the branches such that branches with types with the greatest tag
+    value are evaluated first, hence, a branch with Object as its type will
+    always appear last in the emitted code.
+
+    => 4.C.iii. Dispatch
+
+    As discussed previously, dispatch starts with evaluating each formal 
+    expression and pushing its value (on EAX) onto the stack. Then the 
+    callee expression is evaluated.  The offset for the function to dispatch is
+    calculated in one of two ways, depending on if the dispatch is static or 
+    not.
+
+    If the dispatch is static, then the typename is known at compile time and
+    its dispatch table can be referenced with <typename>_dispTab. Otherwise,
+    the dispatch table is 12 words away from the start of the object reference,
+    so it is calculated with ECX + 12. The method name is translated to an 
+    offset in the dispatch table using the method offset table maintained by 
+    the inheritance tree and set up during the dispatch table emission. Since
+    all descendent share the same offsets, even references to SELF_TYPE will 
+    be safe as SELF_TYPE (and therefore the current node in the inheritance 
+    graph), will be an ancestor to the actual self object referenced in ECX.
+
+
+    => 4.C.iv. Let Statements
+
+    Let statements introduce local variables into the scope. Hence, let
+    statements involve the following steps:
+
+    1. A new scope is allocated and the identifier for the local is added to it
+       with an offset equal to the difference between ESP and EBP (which is
+       calculated and tracked during compile time)
+    2. The initialization expression is emitted and EAX is moved into the 
+       offset of the local variable.
+    3. The body is emitted.
+    4. The stack pointer is incremented to remove the local from the stack
+       and the scope is exited.
+
+
+=> 4.D. Return Values
+
+Return values for every expression and method are always stored in EAX at the
+conclusion of the method / expression.

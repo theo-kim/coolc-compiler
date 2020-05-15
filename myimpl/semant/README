@@ -13,7 +13,7 @@ I will be be discussing four design decisions made by my semantic analyzer:
 	SECTION 4- Correctness of scoping
 
 +-------------------------------------------------------------------------------+
-| SECTION 1- GENERAL OVERVIEW OF PASSES AND THEIR PURPOSES						|
+| SECTION 1- GENERAL OVERVIEW OF PASSES AND THEIR PURPOSES                      |
 +-------------------------------------------------------------------------------+
 
 => 1.A. Passes:
@@ -39,7 +39,7 @@ and 4. This pass only went over the basic classes and added their methods and
 attributes to the class graph structure to be used during the inheritance process.
 
 +-------------------------------------------------------------------------------+
-| SECTION 2- CORRECTNESS OF INHERITANCE CHECKING								|
+| SECTION 2- CORRECTNESS OF INHERITANCE CHECKING                                |
 +-------------------------------------------------------------------------------+
 
 => 2.A. Methodology of Inheritance checking
@@ -75,7 +75,7 @@ inheritance is checked.
 All errors generated during this step halt semantic analysis.
 
 +-------------------------------------------------------------------------------+
-| SECTION 3- CORRECTNESS OF TYPE CHECKING										|
+| SECTION 3- CORRECTNESS OF TYPE CHECKING                                       |
 +-------------------------------------------------------------------------------+
 
 => 3.A. Valid Types in Cool
@@ -163,7 +163,7 @@ expression which can then be propogated upwards in the recurssion, hiding errors
 at lower levels.	
 
 +-------------------------------------------------------------------------------+
-| SECTION 4- CORRECTNESS OF SCOPING												|
+| SECTION 4- CORRECTNESS OF SCOPING                                             |
 +-------------------------------------------------------------------------------+
 
 => 4.A. Scope types

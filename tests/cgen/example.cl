@@ -3,18 +3,40 @@
     as possible.
  *)
 
-class Type {
+class Type inherits IO {
   a : Int <- 10;
-  get() : Int { a };
-  add(a: Int, b: Int, c: Int) : Object { let i : Int <- 1 + 2 in i };
+  add(a: Int, b: Int, c: Int) : Int { 
+    {
+      {
+        out_string("\ta = ");
+        out_int(a);
+        out_string("\n");
+      };
+      -- {
+      --   out_string("\tb = ");
+      --   out_int(b);
+      --   out_string("\n");
+      -- };
+      -- {
+      --   out_string("\tc = ");
+      --   out_int(c);
+      --   out_string("\n");
+      -- };
+      out_string("\ta + b + c = ");
+      let x : Int <- a, -- check let statement
+        y : Int <- b, 
+        z : Int <- c in out_int(x); -- check addition
+      out_string("\n\t");
+      a;
+    }
+  };
 };
 
 class A {
   a : Int <- 3;
   w : Int <- 1 + (2 + 2);
   f : String;
-  test(): Object { 0 };
-  copy() : SELF_TYPE { self };
+  test(): String { "Static Dispatch passed!\n" };
 };
 
 class B inherits A {
@@ -22,7 +44,7 @@ class B inherits A {
   c : String <- "Hello World";
   d : Bool <- not (1 = 1);
   g : Int;
-  test(): Object { b.add(1, 2, 3) };
+  test(): String { "Dispatch passed!\n" };
 };
 
 class C inherits A {};
@@ -32,16 +54,50 @@ class D {};
 class Main inherits IO {
   a : B <- new B;
   b : Int <- 3;
+  t : Type <- new Type;
+  w : Type;
+  -- This basically tests everything
   main(): Object {
-    {
-      a@A.test();
-      while 0 < b loop
+    { -- test block
+      out_string(a.test()); -- Check normal dispatch
+      out_string(a@A.test()); -- Check static dispatch
+      while 0 < b loop -- Check loop
         {
-          b <- b - 1;
-          out_string("Testing\n");
+          out_string("Looping: ");
+          out_int(b);
+          out_string("\n");
+          b <- b - 1; -- Check subtraction
         }
       pool;
-      out_string("Hello World\n");
+      { 
+        out_string("Checking multiplication and parameter calls: \n");
+        out_int(t.add(1, 2, 4)); -- Check dispatch
+        out_string(" = 7\n");
+      };
+      case self of -- case statement
+        v : Int => out_string("Case failed\n");
+        w : Bool => out_string("Case failed\n");
+        x : String => out_string("Case failed\n");
+        y : A => out_string("Case failed\n");
+        z : Object => out_string("Case passed\n");
+      esac;
+      if ( 18 + 7 ) < ( b + 2 ) then -- less than test
+        out_string("Conditional failed\n") -- conditional test
+      else 
+        out_string("Conditional passed\n")
+      fi;
+      -- isvoid()
+      if isvoid(w) then out_string("isvoid() passed\n") else out_string("isvoid() failed\n") fi;
+      {
+        out_string("Testing assignment: "); -- assignment
+        b <- 4;
+        out_int(b + 2);
+        out_string(" = 6\n");
+      };
+      { -- void dispatch runtime error
+        out_string("This should generate and error!\n");
+        w.add(1, 2, 3);
+      };
     }
   };
 };

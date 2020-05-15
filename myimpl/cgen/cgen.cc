@@ -231,7 +231,7 @@ static void emit_pop(char *reg, ostream& str) {
 
 static void emit_stackframe(ostream& s, int vars) {
   emit_push(EBP, s); // push base pointer
-  emit_move(EBP, ESP, s); // Move the stack pointer to the base pointer
+  emit_move(EBP, ESP, s); // Move the base pointer to the stack pointer
   emit_addi(ESP, -(vars * 4), s); // Allocate space for local variables
   stack_history.push_back(stack_offset);
   stack_offset = vars;
@@ -267,6 +267,10 @@ static void emit_initialize_class(Symbol classname, ostream& s) {
   s << NL;
   // Call initialization function
   emit_init_call(classname, s);
+}
+
+static void emit_comment(char *comment, ostream& s) {
+  s << COMMENT << comment << NL;
 }
 
 // static void emit_test_collector(ostream &s)
@@ -1198,6 +1202,7 @@ int let_class::code(ostream &s, CgenNodeP ct) {
   ct->current_scope.enterscope(); // enter a new scope for the local variables
   init->code(s, ct); // emit the code for the local variable
   emit_push(EAX, s); // push local variable onto the stack
+  s << COMMENT << "At offset " << -(stack_offset - 1) * 4 << NL;
   ct->current_scope.addid(identifier, new IdentifierOffset(EBP, -stack_offset)); // add to scope
   body->code(s, ct);
   emit_addi(ESP, 4, s); // clean up local variables from the stack
